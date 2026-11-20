@@ -1,17 +1,16 @@
-// VICE COVER v5 — entrypoint. Copies app/ and screenshots/ into the output
-// directory and writes the make.fun dossier for this entry. Runs bare:
-//   node main.ts
-import { cpSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
+// VICE COVER — entry builder: copies app/ and screenshots/ into the output
+// directory and writes the make.fun dossier for this entry.
 import { buildDossier } from './vendor/makefun-app.ts';
+import { cpSync, mkdirSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
+const repoRoot = dirname(fileURLToPath(import.meta.url));
 const outDir = process.env.MAKEFUN_OUTPUT_DIR || '/output';
-const root = new URL('.', import.meta.url).pathname;
 
 mkdirSync(outDir, { recursive: true });
-for (const name of ['app', 'screenshots']) {
-  const from = root + name;
-  if (existsSync(from)) cpSync(from, outDir + '/' + name, { recursive: true });
-}
+cpSync(join(repoRoot, 'app'), join(outDir, 'app'), { recursive: true });
+cpSync(join(repoRoot, 'screenshots'), join(outDir, 'screenshots'), { recursive: true });
 
 const dossier = buildDossier(outDir, {
   text_max_bytes: 163840,
@@ -20,5 +19,5 @@ const dossier = buildDossier(outDir, {
   app_max_bytes: 50331648,
   app_path_max_bytes: 1000,
 });
-writeFileSync(outDir + '/dossier.json', dossier);
-console.log('wrote ' + outDir + '/dossier.json (' + dossier.length + ' bytes)');
+writeFileSync(join(outDir, 'dossier.json'), dossier);
+console.log(`dossier written: ${dossier.length} bytes`);
