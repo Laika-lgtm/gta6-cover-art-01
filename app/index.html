@@ -3,121 +3,159 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>VICE COVER — GTA-Style Cover Art Maker</title>
+<title>VICE COVER — GTA-style cover art maker</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <header class="topbar">
-  <div class="brand"><span class="brand-mark">VC</span> VICE COVER <span class="brand-sub">cover art maker</span></div>
+  <div class="brand">
+    <span class="brand-mark">VC</span>
+    <div>
+      <h1>VICE COVER</h1>
+      <p>Turn your photos into a crime-epic poster</p>
+    </div>
+  </div>
   <div class="top-actions">
-    <button id="btnSurprise" title="Random layout + grade (S)">🎲 Surprise me</button>
-    <button id="btnUndo" title="Undo (Ctrl+Z)">↩ Undo</button>
-    <button id="btnRedo" title="Redo (Ctrl+Y)">↪ Redo</button>
-    <button id="btnAuto" title="Auto layout from your photos (A)">✦ Auto layout</button>
+    <button id="btn-surprise" type="button" title="Surprise me (S)">Surprise me</button>
+    <button id="btn-auto" type="button" title="Auto layout (A)">Auto layout</button>
+    <button id="btn-undo" type="button" title="Undo (Ctrl+Z)">Undo</button>
+    <button id="btn-redo" type="button" title="Redo (Ctrl+Y)">Redo</button>
+    <span class="export-group">
+      <button id="btn-export-169" type="button">PNG 1920×1080</button>
+      <button id="btn-export-11" type="button">PNG 1080×1080</button>
+      <button id="btn-export-45" type="button">PNG 1080×1350</button>
+    </span>
   </div>
 </header>
 
-<main class="workspace">
-  <aside class="panel panel-left" aria-label="Cover controls">
+<main class="editor">
+  <aside class="panel left">
     <section>
-      <h2>1 · Layout</h2>
-      <div id="layoutGrid" class="thumb-grid"></div>
-    </section>
-    <section>
-      <h2>2 · Colour grade</h2>
-      <div id="gradeGrid" class="thumb-grid"></div>
-      <label class="check"><input type="checkbox" id="optGrain" checked> Film grain</label>
-      <label class="check"><input type="checkbox" id="optVignette" checked> Vignette</label>
-      <label class="check"><input type="checkbox" id="optSeal" checked> Round seal</label>
-      <label class="check"><input type="checkbox" id="optBilling" checked> Billing band</label>
-    </section>
-    <section>
-      <h2>3 · Lettering</h2>
-      <label class="field">Title
-        <input id="inTitle" type="text" value="SUNSET HEIST" maxlength="24">
+      <h2>Photos</h2>
+      <label class="upload-btn">Add your photos
+        <input id="file-input" type="file" accept="image/*" multiple hidden>
       </label>
-      <label class="field">Subtitle
-        <input id="inSubtitle" type="text" value="a vice city story" maxlength="48">
+      <div id="photo-strip" class="strip" aria-label="Your photos"></div>
+      <p class="hint">Click a thumbnail, then click a panel to place it. One photo can fill every panel.</p>
+      <h3>Sample photos</h3>
+      <div id="sample-strip" class="strip" aria-label="Sample photos"></div>
+      <div class="row-btns">
+        <button id="btn-fill-all" type="button">Fill all panels</button>
+        <button id="btn-shuffle-photos" type="button">Shuffle photos</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>Lettering</h2>
+      <label>Title <span class="count" id="title-count">12 / 24</span>
+        <input id="input-title" type="text" maxlength="24" value="SUNSET HEIST" autocomplete="off">
       </label>
-      <label class="field">Title font
-        <select id="selFont">
-          <option value="Anton">Anton — heavy block</option>
-          <option value="Bebas Neue">Bebas Neue — tall caps</option>
-          <option value="Archivo Black">Archivo Black — poster bold</option>
-          <option value="Kaushan Script">Kaushan Script — neon script</option>
+      <label>Tagline
+        <input id="input-tagline" type="text" maxlength="60" value="ONE LAST SCORE · ONE LONG SUNSET" autocomplete="off">
+      </label>
+      <label>Font
+        <select id="select-font">
+          <option value="Anton" selected>Anton — tall &amp; heavy</option>
+          <option value="Bebas Neue">Bebas Neue — condensed</option>
+          <option value="Archivo Black">Archivo Black — blocky</option>
+          <option value="Kaushan Script">Kaushan Script — hand-lettered</option>
         </select>
       </label>
-      <label class="field">Title colour
-        <input id="inTitleColor" type="color" value="#ffffff">
+      <div class="swatches" id="chrome-swatches" aria-label="Chrome title colour">
+        <button type="button" data-chrome="sunset" class="sw active" title="Sunset chrome">Sunset</button>
+        <button type="button" data-chrome="gold" class="sw" title="Gold chrome">Gold</button>
+        <button type="button" data-chrome="pink" class="sw" title="Pink chrome">Pink</button>
+        <button type="button" data-chrome="ice" class="sw" title="Ice chrome">Ice</button>
+        <button type="button" data-chrome="white" class="sw" title="Solid white">White</button>
+      </div>
+      <label>Billing line <span class="count" id="billing-count">0 / 90</span>
+        <input id="input-billing" type="text" maxlength="90" value="A VICE COVER PICTURES PRODUCTION · STARRING YOU AND YOUR CREW" autocomplete="off">
       </label>
-      <label class="field">Billing line
-        <input id="inBilling" type="text" value="VICE COVER PICTURES · STARRING THE CREW · A SUNSET HEIST PRODUCTION" maxlength="90">
+      <label>Masthead quote
+        <input id="input-quote" type="text" maxlength="60" value="THE WILDEST RIDE OF THE SUMMER" autocomplete="off">
+      </label>
+      <label>Gazette name
+        <input id="input-gazette" type="text" maxlength="28" value="THE SUNSET GAZETTE" autocomplete="off">
+      </label>
+      <label>Seal text
+        <input id="input-seal" type="text" maxlength="14" value="BEST CAST" autocomplete="off">
       </label>
     </section>
+
     <section>
-      <h2>4 · Selected panel</h2>
-      <p class="hint">Click a panel in the preview to select it. Drag the photo to move it, click once to mark the face focus point.</p>
-      <label class="field">Cast tag
-        <input id="inCast" type="text" value="THE DRIVER" maxlength="20">
-      </label>
-      <label class="field">Photo zoom <span id="zoomVal">1.20×</span>
-        <input id="inZoom" type="range" min="1" max="3" step="0.05" value="1.2">
-      </label>
-      <div class="row">
-        <button id="btnFaceMode">◎ Mark face point</button>
-        <button id="btnClearFace">Clear face</button>
-      </div>
-      <div class="row">
-        <button id="btnPrevPhoto">‹ Photo</button>
-        <button id="btnNextPhoto">Photo ›</button>
-      </div>
+      <h2>Layout <span class="keys">keys 1–9</span></h2>
+      <div id="layout-grid" class="layout-grid"></div>
+    </section>
+
+    <section>
+      <h2>Grade</h2>
+      <div id="grade-grid" class="grade-grid"></div>
+    </section>
+
+    <section>
+      <h2>Poster dressing</h2>
+      <label class="check"><input id="toggle-frame" type="checkbox" checked> Gold frame</label>
+      <label class="check"><input id="toggle-masthead" type="checkbox" checked> Masthead strip</label>
+      <label class="check"><input id="toggle-ribbon" type="checkbox" checked> Tagline ribbon</label>
+      <label class="check"><input id="toggle-coming" type="checkbox" checked> Coming soon + barcode</label>
+      <label class="check"><input id="toggle-seal" type="checkbox" checked> Gold starburst seal</label>
+      <label class="check"><input id="toggle-billing" type="checkbox" checked> Billing block</label>
+      <label class="check"><input id="toggle-grain" type="checkbox" checked> Film grain</label>
+      <label class="check"><input id="toggle-vignette" type="checkbox" checked> Vignette</label>
     </section>
   </aside>
 
   <section class="stage">
-    <div class="stage-bar">
-      <span id="sizeLabel">Preview · 1920 × 1080</span>
-      <span class="hint">Shortcuts: <b>S</b> surprise · <b>A</b> auto layout · <b>1–8</b> layout · <b>Ctrl+Z / Ctrl+Y</b> undo / redo</span>
+    <div class="aspect-bar">
+      <span>Preview</span>
+      <div class="aspect-btns">
+        <button type="button" data-aspect="landscape" class="active">16:9</button>
+        <button type="button" data-aspect="square">1:1</button>
+        <button type="button" data-aspect="portrait">4:5</button>
+      </div>
+      <span id="panel-readout" class="readout">Panel 1 · THE BOSS</span>
     </div>
     <div class="canvas-wrap">
       <canvas id="cover" width="1920" height="1080"></canvas>
     </div>
-    <div class="export-row">
-      <span class="export-label">Export PNG</span>
-      <button data-export="1920x1080">1920 × 1080 · wide</button>
-      <button data-export="1080x1080">1080 × 1080 · square</button>
-      <button data-export="1080x1350">1080 × 1350 · portrait</button>
-    </div>
-    <p class="fineprint">Photos stay on your machine — nothing is uploaded. All artwork, lettering and fonts in this app are original or SIL OFL licensed. No game logos or artwork are used.</p>
+    <p class="hint">Click a panel to select it. Drag its photo to reposition. Alt+click a panel to drop a face pin where the person is.</p>
   </section>
 
-  <aside class="panel panel-right" aria-label="Photos">
+  <aside class="panel right">
     <section>
-      <h2>Your photos</h2>
-      <label class="upload">＋ Add photos from your machine
-        <input id="fileInput" type="file" accept="image/*" multiple hidden>
+      <h2>Selected panel</h2>
+      <div class="row-btns">
+        <button id="btn-prev-photo" type="button" title="Previous photo">‹ Prev photo</button>
+        <button id="btn-next-photo" type="button" title="Next photo">Next photo ›</button>
+      </div>
+      <label>Zoom <span class="count" id="zoom-readout">1.00×</span>
+        <input id="input-zoom" type="range" min="1" max="3" step="0.05" value="1">
       </label>
-      <div id="photoStrip" class="photo-strip"></div>
-      <p class="hint">Tip: one photo fills every panel, or drop a different photo on each panel. Click a thumbnail, then click a panel to place it.</p>
-    </section>
-    <section>
-      <h2>Sample photos</h2>
-      <div id="sampleStrip" class="photo-strip"></div>
-      <p class="hint">Made with an image model for this app — free to use, no real people.</p>
+      <div class="row-btns">
+        <button id="btn-face" type="button">Mark face here</button>
+        <button id="btn-clear-face" type="button">Clear face pin</button>
+      </div>
+      <p class="hint">Face pin: click “Mark face here”, then click on the person’s face in the preview. The crop will keep them in frame. Alt+click on a panel drops a pin directly.</p>
+      <label>Cast tag
+        <input id="input-tag" type="text" maxlength="18" value="THE BOSS" autocomplete="off">
+      </label>
+      <label>Panel photo
+        <select id="select-panel-photo"></select>
+      </label>
     </section>
     <section>
       <h2>How it works</h2>
       <ol class="steps">
-        <li>Pick a layout and a grade.</li>
-        <li>Click a panel, place a photo, drag to frame it.</li>
-        <li>Mark the face point so the crop keeps the person.</li>
-        <li>Edit the title, cast tags and billing band.</li>
-        <li>Export a PNG in your post size.</li>
+        <li>Pick sample photos or upload your own.</li>
+        <li>Choose a layout and a sunset grade.</li>
+        <li>Letter the title — it renders as striped chrome over the hero.</li>
+        <li>Export the poster as a PNG to share.</li>
       </ol>
+      <p class="fineprint">Everything runs offline in your browser. Your photos never leave your machine. A fan-made cover tool — not affiliated with Rockstar Games.</p>
     </section>
   </aside>
 </main>
 
-<script src="app.js"></script>
+<script type="module" src="app.js"></script>
 </body>
 </html>

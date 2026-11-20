@@ -1,33 +1,34 @@
-// VICE COVER — entry program for gta6-cover-art-01 (Node 22, stdlib only).
-// It hands the static app in: copies app/ and screenshots/ from beside this
-// file into /output (or MAKEFUN_OUTPUT_DIR outside the grader) and writes
-// /output/dossier.json with the vendored make.fun library, so the scorer
-// can check the app and the judge can read its dossier.
-//
-//   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
+// VICE COVER v3 — entry program for gta6-cover-art-01 (Node 22, standard library only).
+// It hands in the offline browser app in app/ plus the screenshots/ renders,
+// and writes the judge's dossier with the vendored make.fun library.
+// Run it bare: `node main.ts` (or with MAKEFUN_OUTPUT_DIR set to stage the output elsewhere).
 
-import { cpSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { buildDossier } from './vendor/makefun-app.ts';
+import { cpSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { buildDossier } from "./vendor/makefun-app.ts";
 
-const repoRoot = fileURLToPath(new URL('.', import.meta.url));
-const outDir = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
+const repoRoot = fileURLToPath(new URL(".", import.meta.url));
+const destination = process.env.MAKEFUN_OUTPUT_DIR ?? "/output";
+const appSource = join(repoRoot, "app");
+const shotsSource = join(repoRoot, "screenshots");
+const appTarget = join(destination, "app");
+const shotsTarget = join(destination, "screenshots");
 
-mkdirSync(outDir, { recursive: true });
-cpSync(join(repoRoot, 'app'), join(outDir, 'app'), { recursive: true });
-mkdirSync(join(outDir, 'screenshots'), { recursive: true });
-if (existsSync(join(repoRoot, 'screenshots'))) {
-  cpSync(join(repoRoot, 'screenshots'), join(outDir, 'screenshots'), { recursive: true });
-}
+mkdirSync(destination, { recursive: true });
+if (existsSync(appTarget)) rmSync(appTarget, { recursive: true, force: true });
+cpSync(appSource, appTarget, { recursive: true });
 
-writeFileSync(
-  join(outDir, 'dossier.json'),
-  buildDossier(outDir, {
-    text_max_bytes: 163840,
-    screenshots: { max: 4, max_bytes: 262144 },
-    app_max_files: 993,
-    app_max_bytes: 50331648,
-    app_path_max_bytes: 1000,
-  }),
-);
+mkdirSync(shotsTarget, { recursive: true });
+if (existsSync(shotsSource)) cpSync(shotsSource, shotsTarget, { recursive: true });
+
+// Gate caps for this bounty: text budget shapes the dossier; the rest refuse
+// anything the scorer would refuse (too many/large screenshots or app files).
+const dossierBytes = buildDossier(destination, {
+  text_max_bytes: 163840,
+  screenshots: { max: 4, max_bytes: 262144 },
+  app_max_files: 993,
+  app_max_bytes: 50331648,
+  app_path_max_bytes: 1000,
+});
+writeFileSync(join(destination, "dossier.json"), dossierBytes);
