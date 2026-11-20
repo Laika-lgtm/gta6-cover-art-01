@@ -1,1241 +1,796 @@
-/* VICE COVER v4 — offline poster maker.
-   One canvas renderer draws every layout and every poster-dressing layer,
-   so the live preview and the exported PNG are the same picture. */
+/* VICE COVER — framed crime-epic poster maker.
+   Canvas cover renderer + 3-column editor. All offline; fonts and sample
+   photos live under app/. Written fresh for the gta6-cover-art-01 bounty. */
 'use strict';
 
-/* ------------------------------------------------------------------ */
-/* Data                                                               */
-/* ------------------------------------------------------------------ */
+const $ = (s) => document.querySelector(s);
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const FUNCTION_WORDS = new Set(['OF', 'THE', 'AND', 'A', 'AN', 'TO', 'IN', 'ON', 'FOR', 'WITH', 'AT', 'BY', 'OR']);
 
+/* ---------- catalogues ---------- */
+const FONTS = {
+  anton:   { label: 'Anton',            css: '"Anton", sans-serif',          file: 'fonts/anton/Anton-Regular.ttf' },
+  bebas:   { label: 'Bebas Neue',       css: '"Bebas Neue", sans-serif',     file: 'fonts/bebasneue/BebasNeue-Regular.ttf' },
+  archivo: { label: 'Archivo Black',    css: '"Archivo Black", sans-serif',  file: 'fonts/archivoblack/ArchivoBlack-Regular.ttf' },
+  kaushan: { label: 'Kaushan Script',   css: '"Kaushan Script", cursive',    file: 'fonts/kaushanscript/KaushanScript-Regular.ttf' },
+};
+const CHROMES = {
+  sunset: { label: 'Sunset', stops: [[0, '#ffe45e'], [0.30, '#ffb347'], [0.55, '#ff7a59'], [0.78, '#ff5e8a'], [1, '#9d5cff']] },
+  gold:   { label: 'Gold',   stops: [[0, '#fff7c0'], [0.35, '#ffd23d'], [0.60, '#f5a623'], [0.85, '#c8860a'], [1, '#8a5a00']] },
+  pink:   { label: 'Pink',   stops: [[0, '#ffd6ec'], [0.35, '#ff9ecf'], [0.60, '#ff5ea8'], [0.85, '#d63384'], [1, '#8a1d5c']] },
+  ice:    { label: 'Ice',    stops: [[0, '#ffffff'], [0.35, '#cfeeff'], [0.60, '#7fd4ff'], [0.85, '#3d9bff'], [1, '#1d5fd6']] },
+  white:  { label: 'White',  stops: [[0, '#ffffff'], [0.5, '#f2f2f2'], [1, '#c9c9c9']] },
+};
+const GRADES = {
+  neon:   { label: 'Neon Sunset', top: '#ff9a3d', bot: '#c2185b', tint: 'rgba(255,60,120,0.10)' },
+  vice:   { label: 'Vice Pink',   top: '#ff5e8a', bot: '#7b2ff7', tint: 'rgba(255,40,160,0.12)' },
+  teal:   { label: 'Teal Night',  top: '#19c2b8', bot: '#0b2a6b', tint: 'rgba(10,120,160,0.12)' },
+  gold:   { label: 'Gold Hour',   top: '#ffc93d', bot: '#b3541e', tint: 'rgba(255,170,40,0.10)' },
+  heat:   { label: 'Heatwave',    top: '#ff6a00', bot: '#a30000', tint: 'rgba(255,60,0,0.12)' },
+  mono:   { label: 'Mono Noir',   top: '#9a9a9a', bot: '#111111', tint: 'rgba(0,0,0,0.10)', gray: true },
+  palm:   { label: 'Palm Teal',   top: '#3ddc97', bot: '#0b5d4e', tint: 'rgba(20,180,120,0.10)' },
+  dusk:   { label: 'Dusk Violet', top: '#b388ff', bot: '#2a1065', tint: 'rgba(120,60,255,0.12)' },
+};
 const SAMPLES = [
-  { key: 's-convertible', label: 'Convertible sunset', file: 'samples/sample-convertible.jpg', face: [0.62, 0.16] },
-  { key: 's-rooftop', label: 'Rooftop dusk', file: 'samples/sample-rooftop.jpg', face: [0.50, 0.22] },
-  { key: 's-couple', label: 'Neon couple', file: 'samples/sample-couple-neon.jpg', face: [0.45, 0.35] },
-  { key: 's-diner', label: 'Diner laugh', file: 'samples/sample-diner.jpg', face: [0.55, 0.38] },
-  { key: 's-pier', label: 'Pier sunset', file: 'samples/sample-pier-duo.jpg', face: [0.35, 0.30] },
-  { key: 's-popout', label: 'Studio popout', file: 'samples/sample-hero-popout.jpg', face: [0.42, 0.14] },
+  { key: 's-convertible', file: 'samples/sample-convertible.jpg', label: 'Convertible sunset', pin: [0.64, 0.20] },
+  { key: 's-rooftop',     file: 'samples/sample-rooftop.jpg',     label: 'Rooftop dusk',       pin: [0.48, 0.23] },
+  { key: 's-couple',      file: 'samples/sample-couple-neon.jpg', label: 'Neon couple',        pin: [0.38, 0.30] },
+  { key: 's-diner',       file: 'samples/sample-diner.jpg',       label: 'Diner laugh',        pin: [0.45, 0.35] },
+  { key: 's-pier',        file: 'samples/sample-pier-duo.jpg',    label: 'Pier sunset',        pin: [0.52, 0.27] },
+  { key: 's-popout',      file: 'samples/sample-hero-popout.jpg', label: 'Studio popout',      pin: [0.50, 0.20] },
 ];
+const CAST_DEFAULTS = ['THE DRIVER', 'THE FIXER', 'THE HEIRESS', 'THE WHEELMAN', 'THE LOOKOUT', 'THE BOSS', 'THE ROOKIE', 'THE GHOST', 'THE QUEEN'];
+const LAYOUTS = ['poster', 'grid', 'hero-left', 'hero-top', 'fullbleed', 'threecol', 'tilted', 'mosaic', 'popout'];
+const LAYOUT_LABELS = { poster: 'Poster hero', grid: 'Grid 2×2', 'hero-left': 'Hero left', 'hero-top': 'Hero top', fullbleed: 'Full bleed', threecol: 'Three columns', tilted: 'Tilted', mosaic: 'Mosaic 9', popout: 'Pop-out hero' };
 
-const CAST_TAGS = ['THE DRIVER', 'THE FIXER', 'THE HEIRESS', 'THE WHEELMAN', 'THE LOOKOUT', 'THE BOSS', 'THE ROOKIE', 'THE GHOST', 'THE QUEEN'];
-
-const LAYOUTS = [
-  { id: 'poster', name: 'Poster hero' },
-  { id: 'grid', name: 'Grid 2×2' },
-  { id: 'hero-left', name: 'Hero left' },
-  { id: 'hero-top', name: 'Hero top' },
-  { id: 'full', name: 'Full bleed' },
-  { id: 'columns', name: 'Three columns' },
-  { id: 'tilted', name: 'Tilted' },
-  { id: 'mosaic', name: 'Mosaic 9' },
-  { id: 'popout', name: 'Pop-out hero' },
-];
-
-const GRADES = [
-  { id: 'neon', name: 'Neon Sunset', top: '#ff7a18', bottom: '#ff2e88', tint: '#ff5e3a' },
-  { id: 'vice', name: 'Vice Pink', top: '#ff2e88', bottom: '#7b2fff', tint: '#ff5ec4' },
-  { id: 'teal', name: 'Teal Night', top: '#00e5c7', bottom: '#0b3d91', tint: '#00b3a0' },
-  { id: 'gold', name: 'Gold Hour', top: '#ffb347', bottom: '#ff6a00', tint: '#ffc46b' },
-  { id: 'heat', name: 'Heatwave', top: '#ff3d00', bottom: '#ffb300', tint: '#ff7a00' },
-  { id: 'mono', name: 'Mono Noir', top: '#e8e8e8', bottom: '#111111', tint: '#888888' },
-  { id: 'palm', name: 'Palm Teal', top: '#00c9a7', bottom: '#005f73', tint: '#00a896' },
-  { id: 'dusk', name: 'Dusk Violet', top: '#7b2fff', bottom: '#ff5e8a', tint: '#8e6bff' },
-];
-
-const PALETTES = [
-  { id: 'sunset', name: 'Sunset', stripes: ['#ffe259', '#ffa751', '#ff5e62', '#b565ff'], edge: '#2b0a3d' },
-  { id: 'gold', name: 'Gold', stripes: ['#fff3a3', '#ffd23e', '#f5a623', '#b8860b'], edge: '#3d2b00' },
-  { id: 'pink', name: 'Pink', stripes: ['#ffd6f2', '#ff9de2', '#ff5ebc', '#c724b1'], edge: '#3d0a2e' },
-  { id: 'ice', name: 'Ice', stripes: ['#e8fbff', '#a5ecff', '#5ec8f2', '#2b6cb0'], edge: '#0a243d' },
-  { id: 'white', name: 'White', stripes: ['#ffffff', '#f2f2f2', '#d9d9d9', '#a6a6a6'], edge: '#222222' },
-];
-
-const FONTS = ['Anton', 'Bebas Neue', 'Archivo Black', 'Kaushan Script'];
-const SIZES = { '1920x1080': [1920, 1080], '1080x1080': [1080, 1080], '1080x1350': [1080, 1350] };
-const GOLD = '#f5c542';
-
-/* ------------------------------------------------------------------ */
-/* State                                                              */
-/* ------------------------------------------------------------------ */
-
+/* ---------- state ---------- */
 function defaultPanels() {
-  const assign = [
-    ['s-convertible', 0], ['s-rooftop', 1], ['s-couple', 2],
-    ['s-diner', 3], ['s-pier', 4], ['s-popout', 5],
-    ['s-diner', 6], ['s-rooftop', 7], ['s-couple', 8],
+  const plan = [
+    { photo: 's-convertible', pin: [0.64, 0.20] },
+    { photo: 's-rooftop',     pin: [0.48, 0.23] },
+    { photo: 's-couple',      pin: [0.38, 0.30] },
+    { photo: 's-diner',       pin: [0.45, 0.35] },
+    { photo: 's-pier',        pin: [0.52, 0.27] },
+    { photo: 's-popout',      pin: [0.50, 0.20] },
+    { photo: 's-diner',       pin: [0.68, 0.32] },
+    { photo: 's-couple',      pin: [0.55, 0.42] },
+    { photo: 's-rooftop',     pin: [0.48, 0.23] },
   ];
-  return assign.map(([photo, tag]) => {
-    const def = SAMPLES.find(s => s.key === photo);
-    return { photo, zoom: 1, ox: 0, oy: 0, face: def ? [...def.face] : null, tag: CAST_TAGS[tag] };
-  });
+  return plan.map((p, i) => ({ photo: p.photo, zoom: 1, ox: 0, oy: 0, pin: p.pin.slice(), tag: CAST_DEFAULTS[i] }));
 }
+const state = {
+  layout: 'poster', grade: 'neon', font: 'anton', chrome: 'sunset',
+  title: 'SUNSET HEIST', tagline: 'ONE LAST SCORE · ONE LONG SUNSET',
+  billing: 'A VICE COVER PICTURES PRODUCTION · STARRING YOU AND YOUR CREW',
+  quote: 'THE WILDEST RIDE OF THE SUMMER', gazette: 'THE SUNSET GAZETTE',
+  toggles: { frame: true, masthead: true, seal: true, billing: true, soon: true, grain: true, vignette: true },
+  panels: defaultPanels(), selected: 0,
+};
+let aspect = '16:9';
+const photos = new Map();           // key -> { img, label }
+const undoStack = [], redoStack = [];
+let markingFace = false, pendingThumb = null, drag = null;
 
-function defaultState() {
-  return {
-    layout: 'poster', grade: 'neon', font: 'Anton', palette: 'sunset',
-    title: 'SUNSET HEIST', tagline: 'ONE LAST SCORE · ONE LONG SUNSET',
-    billing: 'A VICE COVER PICTURES PRODUCTION · STARRING YOU AND YOUR CREW',
-    quote: 'THE WILDEST RIDE OF THE SUMMER', gazette: 'THE SUNSET GAZETTE',
-    show: { frame: true, masthead: true, seal: true, billing: true, coming: true, grain: true, vignette: true },
-    panels: defaultPanels(), selected: 0,
-  };
-}
+function snapshot() { return JSON.stringify({ ...state, panels: state.panels }); }
+function restore(json) { const s = JSON.parse(json); Object.assign(state, s); state.panels = s.panels; }
+function commit() { undoStack.push(snapshot()); if (undoStack.length > 60) undoStack.shift(); redoStack.length = 0; }
+function doUndo() { if (!undoStack.length) return; redoStack.push(snapshot()); restore(undoStack.pop()); syncUI(); render(); }
+function doRedo() { if (!redoStack.length) return; undoStack.push(snapshot()); restore(redoStack.pop()); syncUI(); render(); }
 
-let state = defaultState();
-const photos = new Map(); // key -> {key,label,img,src}
-let uploadCount = 0;
-let pendingPhoto = null;   // thumbnail chosen, waiting for a panel click
-let pinMode = false;
-
-const history = [];
-let histIndex = -1;
-function snapshot() { return JSON.stringify(state); }
-function pushHistory() {
-  history.splice(histIndex + 1);
-  history.push(snapshot());
-  if (history.length > 60) history.shift();
-  histIndex = history.length - 1;
-  syncUndoButtons();
+/* ---------- image loading ---------- */
+function loadImage(src) {
+  return new Promise((res, rej) => { const im = new Image(); im.onload = () => res(im); im.onerror = rej; im.src = src; });
 }
-function restoreHistory(i) {
-  state = JSON.parse(history[i]);
-  histIndex = i;
-  syncAllInputs();
-  render();
-  syncUndoButtons();
-}
-function undo() { if (histIndex > 0) restoreHistory(histIndex - 1); }
-function redo() { if (histIndex < history.length - 1) restoreHistory(histIndex + 1); }
-
-/* ------------------------------------------------------------------ */
-/* Small helpers                                                      */
-/* ------------------------------------------------------------------ */
-
-const $ = id => document.getElementById(id);
-const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
-function hashString(str) {
-  let h = 2166136261;
-  for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
-  return h >>> 0;
-}
-function makeRandom(seed) {
-  let s = seed >>> 0;
-  return () => { s = (Math.imul(s, 1664525) + 1013904223) >>> 0; return s / 4294967296; };
-}
-function roundRectPath(ctx, x, y, w, h, r) {
-  const rad = Math.min(r, w / 2, h / 2);
-  ctx.beginPath();
-  ctx.moveTo(x + rad, y);
-  ctx.arcTo(x + w, y, x + w, y + h, rad);
-  ctx.arcTo(x + w, y + h, x, y + h, rad);
-  ctx.arcTo(x, y + h, x, y, rad);
-  ctx.arcTo(x, y, x + w, y, rad);
-  ctx.closePath();
-}
-function starPath(ctx, cx, cy, spikes, outer, inner) {
-  ctx.beginPath();
-  for (let i = 0; i < spikes * 2; i++) {
-    const r = i % 2 === 0 ? outer : inner;
-    const a = (Math.PI * i) / spikes - Math.PI / 2;
-    const x = cx + Math.cos(a) * r, y = cy + Math.sin(a) * r;
-    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+async function loadSamples() {
+  for (const s of SAMPLES) {
+    try { photos.set(s.key, { img: await loadImage(s.file), label: s.label }); }
+    catch (e) { console.warn('sample failed', s.file); }
   }
-  ctx.closePath();
 }
 
-/* ------------------------------------------------------------------ */
-/* Layout geometry — all rectangles in canvas pixels                  */
-/* ------------------------------------------------------------------ */
-
-function contentBox(W, H) {
-  const m = Math.round(W * 0.014);
-  const top = Math.round(H * 0.075);
-  const bottom = Math.round(H * 0.885);
-  return { x: m, y: top, w: W - 2 * m, h: bottom - top };
+/* ---------- layout geometry (fractions of W/H) ---------- */
+function panelArea(W, H) {
+  const top = (state.toggles.masthead ? 0.062 : 0.012) * H;
+  return { x0: 0.014 * W, x1: 0.986 * W, y0: top + 0.006 * H, y1: 0.885 * H };
 }
-
-// Returns { bg: slot|null, panels: [{slot,x,y,w,h,rot}] }
-function layoutRects(layout, W, H) {
-  const cb = contentBox(W, H);
-  const g = Math.round(W * 0.011);
-  const col = (x, y, w, h, slot, rot) => ({ slot, x, y, w, h, rot: rot || 0 });
-  switch (layout) {
-    case 'poster': {
-      const colW = cb.w - 2 * g;
-      const lw = Math.round(colW * 0.318);
-      const cw = colW - 2 * lw;
-      const lx = cb.x, cx = cb.x + lw + g, rx = cx + cw + g;
-      const stripH = Math.round(cb.h * 0.20);
-      const mainH = cb.h - stripH - g;
-      const topH = Math.round(mainH * 0.58);
-      const botH = mainH - topH - g;
-      const sw = Math.round((cb.w - g) / 2);
-      return { bg: null, panels: [
-        col(cx, cb.y, cw, mainH, 0),
-        col(lx, cb.y, lw, topH, 1),
-        col(lx, cb.y + topH + g, lw, botH, 2),
-        col(rx, cb.y, lw, topH, 3),
-        col(rx, cb.y + topH + g, lw, botH, 4),
-        col(cb.x, cb.y + mainH + g, sw, stripH, 5),
-        col(cb.x + sw + g, cb.y + mainH + g, sw, stripH, 6),
-      ] };
-    }
-    case 'grid': {
-      const w2 = Math.round((cb.w - g) / 2), h2 = Math.round((cb.h - g) / 2);
-      return { bg: null, panels: [
-        col(cb.x, cb.y, w2, h2, 0), col(cb.x + w2 + g, cb.y, w2, h2, 1),
-        col(cb.x, cb.y + h2 + g, w2, h2, 2), col(cb.x + w2 + g, cb.y + h2 + g, w2, h2, 3),
-      ] };
-    }
-    case 'hero-left': {
-      const bw = Math.round(cb.w * 0.56);
-      const rw = cb.w - bw - g;
-      const rx = cb.x + bw + g;
-      const h3 = Math.round((cb.h - 2 * g) / 3);
-      return { bg: null, panels: [
-        col(cb.x, cb.y, bw, cb.h, 0),
-        col(rx, cb.y, rw, h3, 1), col(rx, cb.y + h3 + g, rw, h3, 2), col(rx, cb.y + 2 * (h3 + g), rw, h3, 3),
-      ] };
-    }
-    case 'hero-top': {
-      const bh = Math.round(cb.h * 0.56);
-      const by = cb.y + bh + g;
-      const rh = cb.h - bh - g;
-      const w3 = Math.round((cb.w - 2 * g) / 3);
-      return { bg: null, panels: [
-        col(cb.x, cb.y, cb.w, bh, 0),
-        col(cb.x, by, w3, rh, 1), col(cb.x + w3 + g, by, w3, rh, 2), col(cb.x + 2 * (w3 + g), by, w3, rh, 3),
-      ] };
-    }
-    case 'full':
-      return { bg: null, panels: [col(cb.x, cb.y, cb.w, cb.h, 0)] };
-    case 'columns': {
-      const w3 = Math.round((cb.w - 2 * g) / 3);
-      return { bg: null, panels: [
-        col(cb.x, cb.y, w3, cb.h, 0),
-        col(cb.x + w3 + g, cb.y, w3, cb.h, 1),
-        col(cb.x + 2 * (w3 + g), cb.y, w3, cb.h, 2),
-      ] };
-    }
-    case 'tilted': {
-      const w2 = Math.round((cb.w - g) / 2), h2 = Math.round((cb.h - g) / 2);
-      return { bg: null, panels: [
-        col(cb.x, cb.y, w2, h2, 0, -1.4), col(cb.x + w2 + g, cb.y, w2, h2, 1, 1.2),
-        col(cb.x, cb.y + h2 + g, w2, h2, 2, 1.4), col(cb.x + w2 + g, cb.y + h2 + g, w2, h2, 3, -1.2),
-      ] };
-    }
+function rectsFor(W, H) {
+  const A = panelArea(W, H);
+  const gx = (A.x1 - A.x0), gy = (A.y1 - A.y0);
+  const R = (x, y, w, h, panel, extra) => Object.assign({ x: A.x0 + x * gx, y: A.y0 + y * gy, w: w * gx, h: h * gy, panel }, extra || {});
+  switch (state.layout) {
+    case 'poster': return [
+      R(0.328, 0.00, 0.344, 0.80, 0),
+      R(0.000, 0.00, 0.308, 0.385, 1), R(0.000, 0.405, 0.308, 0.395, 2),
+      R(0.692, 0.00, 0.308, 0.385, 3), R(0.692, 0.405, 0.308, 0.395, 4),
+      R(0.000, 0.82, 0.485, 0.18, 5), R(0.515, 0.82, 0.485, 0.18, 6),
+    ];
+    case 'grid': return [R(0, 0, 0.49, 0.49, 0), R(0.51, 0, 0.49, 0.49, 1), R(0, 0.51, 0.49, 0.49, 2), R(0.51, 0.51, 0.49, 0.49, 3)];
+    case 'hero-left': return [
+      R(0, 0, 0.585, 1, 0),
+      R(0.605, 0, 0.395, 0.32, 1), R(0.605, 0.34, 0.395, 0.32, 2), R(0.605, 0.68, 0.395, 0.32, 3),
+    ];
+    case 'hero-top': return [
+      R(0, 0, 1, 0.56, 0),
+      R(0, 0.58, 0.32, 0.42, 1), R(0.34, 0.58, 0.32, 0.42, 2), R(0.68, 0.58, 0.32, 0.42, 3),
+    ];
+    case 'fullbleed': return [R(0, 0, 1, 1, 0)];
+    case 'threecol': return [R(0, 0, 0.323, 1, 0), R(0.3385, 0, 0.323, 1, 1), R(0.677, 0, 0.323, 1, 2)];
+    case 'tilted': return [
+      R(0, 0, 0.49, 0.49, 0, { rot: -1.4 }), R(0.51, 0, 0.49, 0.49, 1, { rot: 1.4 }),
+      R(0, 0.51, 0.49, 0.49, 2, { rot: 1.2 }), R(0.51, 0.51, 0.49, 0.49, 3, { rot: -1.2 }),
+    ];
     case 'mosaic': {
-      const w3 = Math.round((cb.w - 2 * g) / 3), h3 = Math.round((cb.h - 2 * g) / 3);
       const out = [];
-      for (let r = 0; r < 3; r++)
-        for (let c = 0; c < 3; c++)
-          out.push(col(cb.x + c * (w3 + g), cb.y + r * (h3 + g), w3, h3, r * 3 + c));
-      return { bg: null, panels: out };
+      for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) out.push(R(c * 0.34, r * 0.34, 0.32, 0.32, r * 3 + c));
+      return out;
     }
-    case 'popout': {
-      const hx = cb.x + Math.round(cb.w * 0.56);
-      const hw = cb.w - Math.round(cb.w * 0.56);
-      const hh = Math.round(cb.h * 0.66);
-      const sw = Math.round((Math.round(cb.w * 0.56) - g) / 2);
-      const sy = cb.y + hh + g;
-      const sh = cb.h - hh - g;
-      return { bg: 0, panels: [
-        col(hx, cb.y, hw, hh, 1),
-        col(cb.x, sy, sw, sh, 2),
-        col(cb.x + sw + g, sy, sw, sh, 3),
-      ] };
-    }
-    default:
-      return layoutRects('poster', W, H);
+    case 'popout': return [
+      R(0, 0, 1, 1, 0, { bg: true }),
+      R(0.60, 0.06, 0.36, 0.82, 1, { shadow: true }),
+    ];
+    default: return [R(0, 0, 1, 1, 0)];
   }
 }
-
-/* ------------------------------------------------------------------ */
-/* Photo cropping — source window keeps the face pin visible           */
-/* ------------------------------------------------------------------ */
-
-function cropWindow(panel, img, rect) {
-  const iw = img.naturalWidth, ih = img.naturalHeight;
-  const base = Math.max(rect.w / iw, rect.h / ih) * panel.zoom;
-  const sw = rect.w / base, sh = rect.h / base;
-  const anchor = panel.face ? [panel.face[0] + panel.ox, panel.face[1] + panel.oy] : [0.5 + panel.ox, 0.5 + panel.oy];
-  let sx = clamp(anchor[0] * iw - sw / 2, 0, Math.max(0, iw - sw));
-  let sy = clamp(anchor[1] * ih - sh / 2, 0, Math.max(0, ih - sh));
-  if (sw >= iw) sx = 0;
-  if (sh >= ih) sy = 0;
-  return { sx, sy, sw: Math.min(sw, iw), sh: Math.min(sh, ih) };
+function heroRect(W, H) {
+  const rs = rectsFor(W, H);
+  if (state.layout === 'poster') return rs[0];
+  if (state.layout === 'hero-left' || state.layout === 'hero-top' || state.layout === 'popout') return rs.find(r => r.panel === (state.layout === 'popout' ? 1 : 0)) || rs[0];
+  return null;
 }
 
-function drawPhotoInto(ctx, panel, img, rect) {
-  const win = cropWindow(panel, img, rect);
+/* ---------- photo drawing (cover fit, face-pin aware) ---------- */
+function drawPhoto(ctx, img, rect, panel) {
+  const scale = Math.max(rect.w / img.width, rect.h / img.height) * (panel.zoom || 1);
+  const sw = rect.w / scale, sh = rect.h / scale;
+  let cx, cy;
+  if (panel.pin) { cx = panel.pin[0] * img.width; cy = panel.pin[1] * img.height; }
+  else { cx = img.width / 2; cy = img.height / 2; }
+  cx += (panel.ox || 0) * img.width * 0.22;
+  cy += (panel.oy || 0) * img.height * 0.22;
+  cx = clamp(cx, sw / 2, img.width - sw / 2);
+  cy = clamp(cy, sh / 2, img.height - sh / 2);
   ctx.save();
-  roundRectPath(ctx, rect.x, rect.y, rect.w, rect.h, Math.max(4, rect.w * 0.008));
-  ctx.clip();
-  ctx.drawImage(img, win.sx, win.sy, win.sw, win.sh, rect.x, rect.y, rect.w, rect.h);
+  ctx.beginPath(); ctx.rect(rect.x, rect.y, rect.w, rect.h); ctx.clip();
+  if (GRADES[state.grade].gray) ctx.filter = 'grayscale(1) contrast(1.08)';
+  ctx.drawImage(img, cx - sw / 2, cy - sh / 2, sw, sh, rect.x, rect.y, rect.w, rect.h);
+  ctx.filter = 'none';
   ctx.restore();
-  return win;
 }
+function hashStr(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
 
-/* ------------------------------------------------------------------ */
-/* Title geometry + chrome rendering                                   */
-/* ------------------------------------------------------------------ */
-
-function splitTitle(text) {
-  const words = text.trim().split(/\s+/).filter(Boolean);
-  if (words.length < 2) return [text.trim().toUpperCase() || 'VICE'];
-  let best = 1, bestDiff = Infinity;
-  const total = words.join(' ').length;
-  for (let i = 1; i < words.length; i++) {
-    const left = words.slice(0, i).join(' ').length;
-    const diff = Math.abs(total / 2 - left);
-    if (diff < bestDiff) { bestDiff = diff; best = i; }
+/* ---------- text helpers ---------- */
+function wrapTitle(text, fontCss, size, maxW, ctx) {
+  const words = text.trim().split(/\s+/);
+  if (words.length === 1) return [text.toUpperCase()];
+  let best = null;
+  for (let split = 1; split < words.length; split++) {
+    const a = words.slice(0, split).join(' '), b = words.slice(split).join(' ');
+    const w = Math.max(ctx.measureText(a.toUpperCase()).width, ctx.measureText(b.toUpperCase()).width);
+    if (!best || w < best.w) best = { lines: [a.toUpperCase(), b.toUpperCase()], w };
   }
-  return [words.slice(0, best).join(' ').toUpperCase(), words.slice(best).join(' ').toUpperCase()];
+  return best.lines;
 }
-
-function titleGeom(ctx, W, H) {
-  const lines = splitTitle(state.title);
-  const maxW = W * 0.66;
-  const cap = H * 0.22;
-  let size = cap;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  for (;;) {
-    ctx.font = `${size}px "${state.font}", sans-serif`;
-    const widest = Math.max(...lines.map(l => ctx.measureText(l).width));
-    if (widest <= maxW || size <= H * 0.07) break;
-    size *= 0.92;
-  }
-  const lineH = size * 0.94;
-  const totalH = lines.length * lineH;
-  const topY = H * 0.50 - totalH / 2;
-  return { lines, size, lineH, totalH, topY, maxW, cx: W / 2 };
-}
-
-function drawChromeTitle(ctx, W, H) {
-  const pal = PALETTES.find(p => p.id === state.palette) || PALETTES[0];
-  const g = titleGeom(ctx, W, H);
-  const s = H / 1080;
+function drawChromeText(ctx, lines, cx, topY, size, fontCss) {
+  const lh = size * 0.98;
+  const totalH = lines.length * lh;
+  const grad = ctx.createLinearGradient(0, topY, 0, topY + totalH);
+  for (const [at, col] of CHROMES[state.chrome].stops) grad.addColorStop(at, col);
   ctx.save();
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.font = `${g.size}px "${state.font}", sans-serif`;
+  ctx.font = `${size}px ${fontCss}`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'top';
   ctx.lineJoin = 'round';
-  // striped fill: hard colour bands stacked down the whole title block
-  const grad = ctx.createLinearGradient(0, g.topY, 0, g.topY + g.totalH);
-  grad.addColorStop(0.00, pal.stripes[0]);
-  grad.addColorStop(0.25, pal.stripes[0]);
-  grad.addColorStop(0.25, pal.stripes[1]);
-  grad.addColorStop(0.50, pal.stripes[1]);
-  grad.addColorStop(0.50, pal.stripes[2]);
-  grad.addColorStop(0.75, pal.stripes[2]);
-  grad.addColorStop(0.75, pal.stripes[3]);
-  grad.addColorStop(1.00, pal.stripes[3]);
-  // 3D extrusion, dark, stepping down-right
-  ctx.fillStyle = pal.edge;
-  for (let i = 11; i >= 1; i--) {
-    g.lines.forEach((line, li) => {
-      ctx.fillText(line, g.cx + i * 2.1 * s, g.topY + g.lineH * (li + 0.5) + i * 3.0 * s);
-    });
-  }
-  // white outline, then striped fill, then a thin crisp outline again
-  ctx.lineWidth = Math.max(4, g.size * 0.085);
-  ctx.strokeStyle = '#ffffff';
-  g.lines.forEach((line, li) => {
-    const y = g.topY + g.lineH * (li + 0.5);
-    ctx.strokeText(line, g.cx, y);
-  });
+  // 3D extrusion, dark, shifted down-right
+  ctx.fillStyle = '#2a0a3d';
+  for (let i = 7; i >= 1; i--) lines.forEach((ln, k) => ctx.fillText(ln, cx + i * size * 0.011, topY + k * lh + i * size * 0.014));
+  // white outline
+  ctx.strokeStyle = '#ffffff'; ctx.lineWidth = Math.max(3, size * 0.055);
+  lines.forEach((ln, k) => ctx.strokeText(ln, cx, topY + k * lh));
+  // striped chrome fill
   ctx.fillStyle = grad;
-  g.lines.forEach((line, li) => {
-    const y = g.topY + g.lineH * (li + 0.5);
-    ctx.fillText(line, g.cx, y);
-  });
-  ctx.lineWidth = Math.max(2, g.size * 0.022);
-  g.lines.forEach((line, li) => {
-    const y = g.topY + g.lineH * (li + 0.5);
-    ctx.strokeText(line, g.cx, y);
-  });
+  lines.forEach((ln, k) => ctx.fillText(ln, cx, topY + k * lh));
   ctx.restore();
-  return g;
+  return { x: cx - 0, y: topY, w: 0, h: totalH };
 }
-
-/* ------------------------------------------------------------------ */
-/* Poster dressing                                                     */
-/* ------------------------------------------------------------------ */
-
-let grainTile = null;
-function makeGrainTile() {
-  const t = document.createElement('canvas');
-  t.width = 256; t.height = 256;
-  const c = t.getContext('2d');
-  const img = c.createImageData(256, 256);
-  for (let i = 0; i < img.data.length; i += 4) {
-    const v = Math.floor(Math.random() * 255);
-    img.data[i] = v; img.data[i + 1] = v; img.data[i + 2] = v; img.data[i + 3] = 255;
+function shortenQuote(quote, maxW, ctx) {
+  const words = quote.split(/\s+/);
+  while (words.length > 1) {
+    const cand = words.join(' ');
+    if (ctx.measureText(cand).width <= maxW) return cand;
+    words.pop();
+    while (words.length && FUNCTION_WORDS.has(words[words.length - 1])) words.pop();
   }
-  c.putImageData(img, 0, 0);
-  return t;
+  return words.join(' ');
 }
 
-function drawMasthead(ctx, W, H) {
-  const mh = Math.round(H * 0.075);
-  // Text sizes scale with the SMALLER side, so narrow covers never collide.
-  const s = Math.min(W, H) / 1080;
-  ctx.save();
-  ctx.fillStyle = '#0a0a12';
-  ctx.fillRect(0, 0, W, mh);
-  ctx.fillStyle = GOLD;
-  ctx.fillRect(0, mh - Math.max(2, 3 * s), W, Math.max(2, 3 * s));
-  // five gold stars, left
-  const starX = Math.round(W * 0.014) + 6;
-  for (let i = 0; i < 5; i++) {
-    starPath(ctx, starX + i * Math.round(26 * s) + 9 * s, mh / 2, 5, 11 * s, 4.5 * s);
-    ctx.fillStyle = GOLD;
-    ctx.fill();
-  }
-  // VOL. 1 box, right — fixed first so the texts know their limits
-  const bw = Math.round(104 * s), bh = Math.round(44 * s);
-  const bx = W - Math.round(W * 0.014) - bw, by = (mh - bh) / 2;
-  ctx.fillStyle = GOLD;
-  ctx.fillRect(bx, by, bw, bh);
-  ctx.fillStyle = '#14100a';
-  ctx.font = `${Math.round(23 * s)}px "Anton", sans-serif`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText('VOL. 1', bx + bw / 2, by + bh / 2 + 1);
-  // quote (left) and gazette (centre): shrink together until both fit
-  const quoteX = starX + 5 * Math.round(26 * s) + 14 * s;
-  const gap = Math.round(24 * s);
-  let qSize = 21 * s, gSize = 30 * s;
-  let quote = state.quote.toUpperCase();
-  const gazette = state.gazette.toUpperCase();
-  for (let tries = 0; tries < 30; tries++) {
-    // measure WITH the letter-spacing the draw pass will use — otherwise
-    // the fitted text still collides once the spacing is applied
-    try { ctx.letterSpacing = `${2 * s}px`; } catch (e) {}
-    ctx.font = `${Math.round(qSize)}px "Archivo Black", sans-serif`;
-    const qw = ctx.measureText(quote).width;
-    try { ctx.letterSpacing = `${3 * s}px`; } catch (e) {}
-    ctx.font = `${Math.round(gSize)}px "Anton", sans-serif`;
-    const gw = ctx.measureText(gazette).width;
-    const gzLeft = W / 2 - gw / 2;
-    const gzRight = W / 2 + gw / 2;
-    if (quoteX + qw + gap < gzLeft && gzRight + gap < bx) break;
-    if (qSize > 12 * s) { qSize *= 0.92; gSize *= 0.92; continue; }
-    // Last resort when the cover is too narrow for the full quote even at
-    // the smallest size: on narrow covers (portrait / square) drop whole
-    // trailing words, so the masthead shows a short COMPLETE quote
-    // ("THE WILDEST RIDE") instead of a mid-word ellipsis, which reads as
-    // a defect. Wide covers keep the old ellipsis path and are untouched.
-    if (W <= H) {
-      // Drop the last word, then any trailing function words, so the short
-      // quote never dangles mid-phrase ("THE WILDEST RIDE", not
-      // "THE WILDEST RIDE OF THE").
-      let shorter = quote.replace(/\s+\S+\s*$/, '');
-      const STOP = /\s+(?:OF|THE|AND|A|AN|TO|IN|ON|FOR|WITH|AT|BY)\s*$/i;
-      while (STOP.test(shorter)) shorter = shorter.replace(STOP, '');
-      if (shorter && shorter !== quote) { quote = shorter; continue; }
-    } else if (quote.length > 4) { quote = quote.slice(0, -2) + '…'; continue; }
-    break;
-  }
-  try { ctx.letterSpacing = '0px'; } catch (e) {}
-  ctx.fillStyle = '#ffffff';
-  ctx.font = `${Math.round(qSize)}px "Archivo Black", sans-serif`;
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'middle';
-  try { ctx.letterSpacing = `${2 * s}px`; } catch (e) {}
-  ctx.fillText(quote, quoteX, mh / 2 + 1);
-  ctx.font = `${Math.round(gSize)}px "Anton", sans-serif`;
-  ctx.textAlign = 'center';
-  try { ctx.letterSpacing = `${3 * s}px`; } catch (e) {}
-  ctx.fillText(gazette, W / 2, mh / 2 + 1);
-  try { ctx.letterSpacing = '0px'; } catch (e) {}
-  ctx.restore();
+/* ---------- the cover renderer ---------- */
+let noiseCanvas = null;
+function getNoise() {
+  if (noiseCanvas) return noiseCanvas;
+  noiseCanvas = document.createElement('canvas');
+  noiseCanvas.width = 192; noiseCanvas.height = 192;
+  const nctx = noiseCanvas.getContext('2d');
+  const im = nctx.createImageData(192, 192);
+  for (let i = 0; i < im.data.length; i += 4) { const v = 118 + Math.floor(Math.random() * 20); im.data[i] = im.data[i + 1] = im.data[i + 2] = v; im.data[i + 3] = 255; }
+  nctx.putImageData(im, 0, 0);
+  return noiseCanvas;
 }
 
-function splitBilling() {
-  const parts = state.billing.split('·').map(p => p.trim()).filter(Boolean);
-  if (parts.length >= 2) return [parts[0].toUpperCase(), parts.slice(1).join(' · ').toUpperCase()];
-  const words = state.billing.trim().split(/\s+/);
-  const mid = Math.ceil(words.length / 2);
-  return [words.slice(0, mid).join(' ').toUpperCase(), words.slice(mid).join(' ').toUpperCase()];
-}
-
-function drawBottomBand(ctx, W, H, titleGeomInfo) {
-  // Font sizes scale with the SMALLER side: in portrait the band is narrow.
-  const s = Math.min(W, H) / 1080;
-  const y0 = Math.round(H * 0.885);
-  const m = Math.round(W * 0.014);
-  ctx.save();
-  if (state.show.billing) {
-    const [l1, l2] = splitBilling();
-    // shrink the billing until both lines fit the centre lane, clear of
-    // COMING SOON on the left and the barcode on the right
-    let f1 = 22 * s, f2 = 20 * s;
-    const maxW = W * 0.46;
-    for (let tries = 0; tries < 20; tries++) {
-      // measure with the letter-spacing the draw pass applies
-      try { ctx.letterSpacing = `${1.5 * s}px`; } catch (e) {}
-      ctx.font = `${Math.round(f1)}px "Archivo Black", sans-serif`;
-      const w1 = ctx.measureText(l1).width;
-      ctx.font = `${Math.round(f2)}px "Archivo Black", sans-serif`;
-      const w2 = ctx.measureText(l2).width;
-      if (Math.max(w1, w2) <= maxW) break;
-      f1 *= 0.92; f2 *= 0.92;
-    }
-    try { ctx.letterSpacing = '0px'; } catch (e) {}
-    ctx.fillStyle = '#ffffff';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    try { ctx.letterSpacing = `${1.5 * s}px`; } catch (e) {}
-    ctx.font = `${Math.round(f1)}px "Archivo Black", sans-serif`;
-    ctx.fillText(l1, W / 2, y0 + Math.round(30 * s));
-    ctx.font = `${Math.round(f2)}px "Archivo Black", sans-serif`;
-    ctx.fillText(l2, W / 2, y0 + Math.round(66 * s));
-    try { ctx.letterSpacing = '0px'; } catch (e) {}
-  }
-  if (state.show.coming) {
-    ctx.fillStyle = GOLD;
-    ctx.font = `${Math.round(40 * s)}px "Anton", sans-serif`;
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'middle';
-    try { ctx.letterSpacing = `${2 * s}px`; } catch (e) {}
-    ctx.fillText('COMING SOON', m, y0 + (H - y0) / 2 + 2);
-    try { ctx.letterSpacing = '0px'; } catch (e) {}
-    // deterministic barcode from the title
-    const rand = makeRandom(hashString(state.title || 'vice'));
-    const digits = Array.from({ length: 12 }, () => Math.floor(rand() * 10)).join('');
-    const bw = Math.round(210 * s), bh = Math.round(52 * s);
-    const bx = W - m - bw, by = y0 + Math.round(56 * s);
-    ctx.fillStyle = '#ffffff';
-    ctx.font = `${Math.round(15 * s)}px "Archivo Black", sans-serif`;
-    ctx.textAlign = 'center';
-    ctx.fillText(digits.slice(0, 1) + ' ' + digits.slice(1, 7) + ' ' + digits.slice(7), bx + bw / 2, y0 + Math.round(38 * s));
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(bx - 4, by - 4, bw + 8, bh + 8);
-    ctx.fillStyle = '#111111';
-    let px = bx;
-    while (px < bx + bw - 3) {
-      const wbar = 2 + Math.floor(rand() * 4);
-      const gap = 1 + Math.floor(rand() * 3);
-      if (rand() > 0.35) ctx.fillRect(px, by, wbar, bh);
-      px += wbar + gap;
-    }
-  }
-  ctx.restore();
-}
-
-function drawSeal(ctx, W, H) {
-  const s = H / 1080;
-  // low-right of the hero: clear of every face pin in the default poster
-  const cx = W * 0.73, cy = H * 0.68;
-  const R = W * 0.052;
-  ctx.save();
-  const grad = ctx.createRadialGradient(cx - R * 0.3, cy - R * 0.3, R * 0.1, cx, cy, R);
-  grad.addColorStop(0, '#ffe98a');
-  grad.addColorStop(1, '#e8a91c');
-  starPath(ctx, cx, cy, 14, R, R * 0.80);
-  ctx.fillStyle = grad;
-  ctx.fill();
-  ctx.lineWidth = Math.max(2, 3 * s);
-  ctx.strokeStyle = '#8a6d1f';
-  ctx.stroke();
-  ctx.fillStyle = '#241a04';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.font = `${Math.round(R * 0.30)}px "Archivo Black", sans-serif`;
-  ctx.fillText('BEST', cx, cy - R * 0.17);
-  ctx.fillText('CAST', cx, cy + R * 0.17);
-  ctx.restore();
-}
-
-function drawSunsetLines(ctx, W, H, titleG) {
-  const s = H / 1080;
-  const cy = titleG.topY + titleG.totalH + Math.round(22 * s);
-  const widths = [0.30, 0.22, 0.15];
-  const colors = ['#ff7a18', '#ff2e88', '#ffc46b'];
-  const heights = [6, 5, 4];
-  ctx.save();
-  widths.forEach((f, i) => {
-    const w = W * f, x = W / 2 - w / 2;
-    ctx.fillStyle = colors[i];
-    ctx.fillRect(x, cy + i * Math.round(11 * s), w, Math.round(heights[i] * s));
-  });
-  ctx.restore();
-  return cy + 3 * Math.round(11 * s);
-}
-
-// Ribbon rectangle, computed from the title block so chips can dodge it too.
-function ribbonGeom(ctx, W, H, titleG) {
-  const sH = H / 1080, s2 = Math.min(W, H) / 1080;
-  const linesEnd = titleG.topY + titleG.totalH + Math.round(22 * sH) + 3 * Math.round(11 * sH);
-  const by = linesEnd + Math.round(12 * s2);
-  ctx.save();
-  ctx.font = `${Math.round(28 * s2)}px "Archivo Black", sans-serif`;
-  try { ctx.letterSpacing = `${3 * s2}px`; } catch (e) {}
-  const tw = ctx.measureText(state.tagline.toUpperCase()).width;
-  ctx.restore();
-  const pad = Math.round(46 * s2);
-  const bw = tw + pad * 2, bh = Math.round(46 * s2);
-  return { x: W / 2 - bw / 2, y: by, w: bw, h: bh };
-}
-
-function drawRibbon(ctx, W, H, titleG) {
-  const s2 = Math.min(W, H) / 1080;
-  const r = ribbonGeom(ctx, W, H, titleG);
-  const notch = Math.round(14 * s2);
-  ctx.save();
-  ctx.beginPath();
-  ctx.moveTo(r.x + notch, r.y);
-  ctx.lineTo(r.x + r.w - notch, r.y);
-  ctx.lineTo(r.x + r.w, r.y + r.h / 2);
-  ctx.lineTo(r.x + r.w - notch, r.y + r.h);
-  ctx.lineTo(r.x + notch, r.y + r.h);
-  ctx.lineTo(r.x, r.y + r.h / 2);
-  ctx.closePath();
-  ctx.fillStyle = '#ff2e88';
-  ctx.fill();
-  ctx.fillStyle = '#ffffff';
-  ctx.font = `${Math.round(28 * s2)}px "Archivo Black", sans-serif`;
-  try { ctx.letterSpacing = `${3 * s2}px`; } catch (e) {}
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(state.tagline.toUpperCase(), W / 2, r.y + r.h / 2 + 1);
-  try { ctx.letterSpacing = '0px'; } catch (e) {}
-  ctx.restore();
-}
-
-/* ------------------------------------------------------------------ */
-/* The one renderer — preview and export share it                      */
-/* ------------------------------------------------------------------ */
-
-function renderCover(ctx, W, H, opts) {
-  const forExport = !!(opts && opts.forExport);
-  const grade = GRADES.find(gr => gr.id === state.grade) || GRADES[0];
-  ctx.save();
+function drawCover(ctx, W, H, opts) {
+  const clean = !!(opts && opts.clean);
+  const T = state.toggles;
+  const grade = GRADES[state.grade];
   ctx.clearRect(0, 0, W, H);
-  ctx.fillStyle = '#0a0a12';
-  ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = '#14101f'; ctx.fillRect(0, 0, W, H);
 
-  const geo = layoutRects(state.layout, W, H);
-  const wins = new Map(); // slot -> crop window, for face-pin math
-
-  // pop-out background photo, full bleed behind everything
-  if (geo.bg !== null && geo.bg !== undefined) {
-    const bgPanel = state.panels[geo.bg];
-    const bgPhoto = photos.get(bgPanel.photo);
-    if (bgPhoto && bgPhoto.img) {
-      if (grade.id === 'mono') ctx.filter = 'grayscale(1) contrast(1.06)';
-      drawPhotoInto(ctx, bgPanel, bgPhoto.img, { x: 0, y: 0, w: W, h: H });
-      ctx.filter = 'none';
-    }
-  }
-
-  // panels
-  geo.panels.forEach(p => {
-    const panel = state.panels[p.slot];
-    const photo = photos.get(panel.photo);
-    if (!photo || !photo.img) return;
+  // photos
+  const rects = rectsFor(W, H);
+  for (const r of rects) {
+    const panel = state.panels[r.panel];
+    const rec = photos.get(panel.photo);
+    if (!rec) continue;
     ctx.save();
-    if (p.rot) {
-      ctx.translate(p.x + p.w / 2, p.y + p.h / 2);
-      ctx.rotate((p.rot * Math.PI) / 180);
-      ctx.translate(-(p.x + p.w / 2), -(p.y + p.h / 2));
-    }
-    if (state.layout === 'popout' && p.slot === 1) {
-      ctx.shadowColor = 'rgba(0,0,0,0.55)';
-      ctx.shadowBlur = W * 0.02;
-      ctx.shadowOffsetY = H * 0.012;
-    }
-    if (grade.id === 'mono') ctx.filter = 'grayscale(1) contrast(1.06)';
-    const win = drawPhotoInto(ctx, panel, photo.img, p);
-    ctx.filter = 'none';
+    if (r.rot) { ctx.translate(r.x + r.w / 2, r.y + r.h / 2); ctx.rotate(r.rot * Math.PI / 180); ctx.translate(-(r.x + r.w / 2), -(r.y + r.h / 2)); }
+    if (r.shadow) { ctx.shadowColor = 'rgba(0,0,0,0.55)'; ctx.shadowBlur = 0.03 * W; ctx.shadowOffsetY = 0.012 * H; }
+    drawPhoto(ctx, rec.img, r, panel);
     ctx.restore();
-    wins.set(p.slot, { rect: p, win, img: photo.img });
-  });
-
-  // sunset grade wash over the whole cover
-  const wash = ctx.createLinearGradient(0, 0, 0, H);
-  wash.addColorStop(0, grade.top);
-  wash.addColorStop(1, grade.bottom);
-  ctx.save();
-  ctx.globalAlpha = 0.22;
-  ctx.fillStyle = wash;
-  ctx.fillRect(0, 0, W, H);
-  ctx.globalAlpha = 0.45;
-  ctx.globalCompositeOperation = 'soft-light';
-  ctx.fillStyle = grade.tint;
-  ctx.fillRect(0, 0, W, H);
-  ctx.restore();
-
-  // title geometry first: chips must dodge it (and the ribbon below it)
-  const titleG = titleGeom(ctx, W, H);
-  const titleRect = {
-    x: titleG.cx - titleG.maxW / 2, y: titleG.topY - 6,
-    w: titleG.maxW, h: titleG.totalH + 12,
-  };
-  const ribbonRect = ribbonGeom(ctx, W, H, titleG);
-
-  // cast chips, top-left of each panel, skipped when the title or ribbon covers them
-  if (state.layout !== 'full') {
-    geo.panels.forEach(p => {
-      const panel = state.panels[p.slot];
-      const chipH = Math.round(Math.min(W, H) * 0.042);
-      const chip = { x: p.x + Math.round(W * 0.008), y: p.y + Math.round(H * 0.010), w: 0, h: chipH };
-      ctx.save();
-      ctx.font = `${Math.round(Math.min(W, H) * 0.024)}px "Archivo Black", sans-serif`;
-      const tw = ctx.measureText(panel.tag).width;
-      chip.w = tw + Math.round(W * 0.016);
-      const hit = r => chip.x < r.x + r.w && chip.x + chip.w > r.x &&
-        chip.y < r.y + r.h && chip.y + chip.h > r.y;
-      const overlap = hit(titleRect) || hit(ribbonRect);
-      if (!overlap) {
-        ctx.fillStyle = 'rgba(0,0,0,0.62)';
-        roundRectPath(ctx, chip.x, chip.y, chip.w, chip.h, chip.h * 0.28);
-        ctx.fill();
-        ctx.fillStyle = '#ffffff';
-        ctx.textAlign = 'left';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(panel.tag, chip.x + Math.round(W * 0.008), chip.y + chip.h / 2 + 1);
-      }
-      ctx.restore();
-    });
+    if (!r.bg) { ctx.strokeStyle = 'rgba(20,8,30,0.85)'; ctx.lineWidth = Math.max(2, 0.004 * W); ctx.strokeRect(r.x, r.y, r.w, r.h); }
   }
 
-  // poster dressing
-  const drawnTitle = drawChromeTitle(ctx, W, H);
-  drawSunsetLines(ctx, W, H, drawnTitle);
-  drawRibbon(ctx, W, H, drawnTitle);
-  if (state.show.seal) drawSeal(ctx, W, H);
-  if (state.show.masthead) drawMasthead(ctx, W, H);
-  drawBottomBand(ctx, W, H, drawnTitle);
+  // grade wash + tint
+  const wash = ctx.createLinearGradient(0, 0, 0, H);
+  wash.addColorStop(0, grade.top); wash.addColorStop(1, grade.bot);
+  ctx.save(); ctx.globalAlpha = 0.16; ctx.globalCompositeOperation = 'overlay'; ctx.fillStyle = wash; ctx.fillRect(0, 0, W, H); ctx.restore();
+  ctx.save(); ctx.globalAlpha = 1; ctx.fillStyle = grade.tint; ctx.fillRect(0, 0, W, H); ctx.restore();
 
   // gold frame
-  if (state.show.frame) {
+  if (T.frame) {
     ctx.save();
-    ctx.strokeStyle = GOLD;
-    ctx.lineWidth = Math.max(3, H * 0.005);
-    ctx.strokeRect(Math.round(W * 0.003), Math.round(H * 0.005), W - Math.round(W * 0.006), H - Math.round(H * 0.010));
-    ctx.globalAlpha = 0.55;
-    ctx.lineWidth = Math.max(1.5, H * 0.0018);
-    ctx.strokeRect(Math.round(W * 0.009), Math.round(H * 0.016), W - Math.round(W * 0.018), H - Math.round(H * 0.032));
+    ctx.strokeStyle = '#d4af37'; ctx.lineWidth = Math.max(3, 0.004 * W); ctx.strokeRect(0.004 * W, 0.004 * H, W - 0.008 * W, H - 0.008 * H);
+    ctx.strokeStyle = 'rgba(212,175,55,0.65)'; ctx.lineWidth = Math.max(1.5, 0.0016 * W);
+    ctx.strokeRect(0.014 * W, 0.014 * H, W - 0.028 * W, H - 0.028 * H);
     ctx.restore();
   }
 
-  // film grain + vignette
-  if (state.show.grain) {
-    if (!grainTile) grainTile = makeGrainTile();
-    const pat = ctx.createPattern(grainTile, 'repeat');
+  // masthead
+  let mastH = 0;
+  if (T.masthead) {
+    mastH = 0.062 * H;
     ctx.save();
-    ctx.globalAlpha = 0.09;
-    ctx.globalCompositeOperation = 'overlay';
-    ctx.fillStyle = pat;
-    ctx.fillRect(0, 0, W, H);
-    ctx.restore();
-  }
-  if (state.show.vignette) {
-    const vg = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.42, W / 2, H / 2, Math.max(W, H) * 0.72);
-    vg.addColorStop(0, 'rgba(0,0,0,0)');
-    vg.addColorStop(1, 'rgba(0,0,0,0.34)');
-    ctx.save();
-    ctx.fillStyle = vg;
-    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#0d0a1e'; ctx.fillRect(0, 0, W, mastH);
+    ctx.fillStyle = '#d4af37'; ctx.fillRect(0, mastH - Math.max(2, 0.002 * H), W, Math.max(2, 0.002 * H));
+    const pad = 0.018 * W;
+    let fs = 0.030 * H, quote = state.quote.toUpperCase(), gaz = state.gazette.toUpperCase();
+    const stars = '★★★★★';
+    const volW = 0.075 * W;
+    const gap = 0.012 * W;
+    const measureAll = () => {
+      ctx.font = `${fs}px ${FONTS.anton.css}`;
+      const sw = ctx.measureText(stars).width, qw = ctx.measureText(quote).width, gw = ctx.measureText(gaz).width;
+      return { sw, qw, gw };
+    };
+    let m = measureAll();
+    // the gazette is centred, so the left group must end before it starts
+    // and the gazette must end before the VOL. 1 box — a plain total is not enough
+    const fits = () => {
+      const leftEnd = pad + m.sw + gap + m.qw;
+      const gazLeft = W / 2 - m.gw / 2, gazRight = W / 2 + m.gw / 2;
+      return leftEnd <= gazLeft - gap && gazRight <= W - pad - volW - gap;
+    };
+    while (!fits() && fs > 13) { fs *= 0.92; m = measureAll(); }
+    if (!fits() && W <= H) { // narrow cover: shorten the quote by whole words only, never mid-word
+      ctx.font = `${fs}px ${FONTS.anton.css}`;
+      const maxQ = Math.max(0.10 * W, (W / 2 - m.gw / 2 - gap) - (pad + m.sw + gap));
+      quote = shortenQuote(quote, maxQ, ctx);
+      m = measureAll();
+      while (!fits() && fs > 12) { fs *= 0.92; m = measureAll(); }
+    }
+    ctx.font = `${fs}px ${FONTS.anton.css}`;
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#ffd23d'; ctx.textAlign = 'left';
+    ctx.fillText(stars, pad, mastH / 2);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(quote, pad + m.sw + 0.012 * W, mastH / 2);
+    ctx.textAlign = 'center'; ctx.fillStyle = '#ffffff';
+    ctx.fillText(gaz, W / 2, mastH / 2);
+    // VOL. 1 box
+    const bw = volW, bh = mastH * 0.62, bx = W - pad - bw, by = (mastH - bh) / 2;
+    ctx.fillStyle = '#ffd23d'; ctx.fillRect(bx, by, bw, bh);
+    ctx.fillStyle = '#241505'; ctx.font = `${Math.max(12, fs * 0.95)}px ${FONTS.anton.css}`;
+    ctx.fillText('VOL. 1', bx + bw / 2, mastH / 2);
     ctx.restore();
   }
 
-  // editor-only markers: selection outline + face pins
-  if (!forExport) {
-    geo.panels.forEach(p => {
-      const panel = state.panels[p.slot];
-      if (panel.face) {
-        const win = wins.get(p.slot);
-        if (win) {
-          const fx = p.x + ((panel.face[0] * win.img.naturalWidth - win.win.sx) / win.win.sw) * p.w;
-          const fy = p.y + ((panel.face[1] * win.img.naturalHeight - win.win.sy) / win.win.sh) * p.h;
-          if (fx >= p.x && fx <= p.x + p.w && fy >= p.y && fy <= p.y + p.h) {
-            const r = Math.max(7, W * 0.009);
-            ctx.save();
-            ctx.strokeStyle = '#2ee6c8';
-            ctx.lineWidth = 3;
-            ctx.beginPath(); ctx.arc(fx, fy, r, 0, Math.PI * 2); ctx.stroke();
-            ctx.beginPath();
-            ctx.moveTo(fx - r - 6, fy); ctx.lineTo(fx - r + 2, fy);
-            ctx.moveTo(fx + r - 2, fy); ctx.lineTo(fx + r + 6, fy);
-            ctx.moveTo(fx, fy - r - 6); ctx.lineTo(fx, fy - r + 2);
-            ctx.moveTo(fx, fy + r - 2); ctx.lineTo(fx, fy + r + 6);
-            ctx.stroke();
-            ctx.restore();
-          }
-        }
-      }
-    });
-    const sel = geo.panels.find(p => p.slot === state.selected);
+  // title (striped chrome, centred on the hero)
+  const hero = heroRect(W, H);
+  const titleCx = hero ? hero.x + hero.w / 2 : W / 2;
+  const titleCy = hero ? hero.y + hero.h * 0.56 : 0.50 * H;
+  const maxTitleW = W > H ? 0.68 * W : 0.94 * W;
+  const fontCss = FONTS[state.font].css;
+  let tSize = Math.min(0.235 * H, 250 * (H / 1080));
+  ctx.save();
+  ctx.font = `${tSize}px ${fontCss}`;
+  const probe = wrapTitle(state.title, fontCss, tSize, maxTitleW, ctx);
+  const widest = Math.max(...probe.map(l => ctx.measureText(l).width));
+  if (widest > maxTitleW) tSize *= maxTitleW / widest;
+  tSize = Math.min(tSize, 0.21 * H);
+  ctx.restore();
+  const lines = wrapTitle(state.title, fontCss, tSize, maxTitleW, ctx);
+  const lineH = tSize * 0.98;
+  const titleTop = titleCy - (lines.length * lineH) / 2;
+  const titleRect = { x: titleCx - maxTitleW / 2, y: titleTop - 0.01 * H, w: maxTitleW, h: lines.length * lineH + 0.02 * H };
+  drawChromeText(ctx, lines, titleCx, titleTop, tSize, fontCss);
+
+  // sunset lines under the title
+  const sunY = titleTop + lines.length * lineH + 0.018 * H;
+  ctx.save();
+  const sunCols = ['#ff9a3d', '#ff5e8a', '#ffd23d'];
+  [0.46, 0.32, 0.20].forEach((fw, i) => {
+    ctx.fillStyle = sunCols[i];
+    const lw = fw * W, lh = Math.max(3, 0.005 * H);
+    ctx.fillRect(titleCx - lw / 2, sunY + i * (lh + 0.006 * H), lw, lh);
+  });
+  ctx.restore();
+
+  // tagline ribbon
+  let ribbonRect = null;
+  {
+    const ribY = sunY + 0.032 * H;
+    const ribH = 0.046 * H;
+    let rfs = 0.026 * H;
+    ctx.save();
+    ctx.font = `${rfs}px ${FONTS.anton.css}`;
+    const tw = ctx.measureText(state.tagline.toUpperCase()).width;
+    if (tw + 0.06 * W > 0.88 * W) rfs *= (0.88 * W) / (tw + 0.06 * W);
+    ctx.font = `${rfs}px ${FONTS.anton.css}`;
+    const rw = Math.min(0.88 * W, ctx.measureText(state.tagline.toUpperCase()).width + 0.06 * W);
+    const rx = titleCx - rw / 2, slant = 0.016 * W;
+    ribbonRect = { x: rx, y: ribY, w: rw, h: ribH };
+    ctx.beginPath();
+    ctx.moveTo(rx + slant, ribY); ctx.lineTo(rx + rw - slant, ribY); ctx.lineTo(rx + rw, ribY + ribH / 2);
+    ctx.lineTo(rx + rw - slant, ribY + ribH); ctx.lineTo(rx + slant, ribY + ribH); ctx.lineTo(rx, ribY + ribH / 2);
+    ctx.closePath();
+    ctx.fillStyle = '#ff2e7e'; ctx.fill();
+    ctx.fillStyle = '#ffffff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(state.tagline.toUpperCase(), titleCx, ribY + ribH / 2 + 1);
+    ctx.restore();
+  }
+
+  // gold starburst seal (right side, clear of faces)
+  if (T.seal) {
+    const sx = 0.735 * W, sy = 0.665 * H, R = 0.052 * W;
+    ctx.save();
+    ctx.beginPath();
+    for (let i = 0; i < 32; i++) {
+      const ang = (i / 32) * Math.PI * 2 - Math.PI / 2;
+      const rr = i % 2 === 0 ? R : R * 0.80;
+      const px = sx + Math.cos(ang) * rr, py = sy + Math.sin(ang) * rr;
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    const sg = ctx.createRadialGradient(sx - R * 0.3, sy - R * 0.3, R * 0.1, sx, sy, R);
+    sg.addColorStop(0, '#ffe98a'); sg.addColorStop(1, '#f5a623');
+    ctx.fillStyle = sg; ctx.fill();
+    ctx.strokeStyle = '#7a4a00'; ctx.lineWidth = Math.max(2, 0.002 * W); ctx.stroke();
+    ctx.fillStyle = '#3d2400'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = `${Math.max(12, R * 0.30)}px ${FONTS.anton.css}`;
+    ctx.fillText('BEST', sx, sy - R * 0.16);
+    ctx.fillText('CAST', sx, sy + R * 0.16);
+    ctx.restore();
+  }
+
+  // billing block + COMING SOON + barcode (bottom strip)
+  const stripY = 0.905 * H;
+  if (T.billing) {
+    let b1 = '', b2 = '';
+    const parts = state.billing.split('·').map(s => s.trim()).filter(Boolean);
+    if (parts.length >= 2) { b1 = parts[0].toUpperCase(); b2 = parts.slice(1).join(' · ').toUpperCase(); }
+    else {
+      const words = state.billing.toUpperCase().split(/\s+/);
+      let half = Math.ceil(words.length / 2);
+      b1 = words.slice(0, half).join(' '); b2 = words.slice(half).join(' ');
+    }
+    ctx.save();
+    let bfs = 0.024 * H;
+    ctx.font = `${bfs}px ${FONTS.anton.css}`;
+    const bw1 = ctx.measureText(b1).width, bw2 = ctx.measureText(b2).width;
+    const widestB = Math.max(bw1, bw2);
+    if (widestB > 0.60 * W) bfs *= (0.60 * W) / widestB;
+    ctx.font = `${bfs}px ${FONTS.anton.css}`;
+    ctx.fillStyle = '#ffffff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(b1, W / 2, stripY + 0.012 * H);
+    ctx.fillText(b2, W / 2, stripY + 0.042 * H);
+    ctx.restore();
+  }
+  if (T.soon) {
+    ctx.save();
+    ctx.font = `${0.030 * H}px ${FONTS.anton.css}`;
+    ctx.fillStyle = '#ffd23d'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    ctx.fillText('COMING SOON', 0.018 * W, stripY + 0.028 * H);
+    // deterministic barcode from the title
+    const seed = hashStr(state.title || 'VICE');
+    const bw = 0.115 * W, bh = 0.062 * H, bx = W - 0.018 * W - bw, by = stripY - 0.006 * H;
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(bx, by, bw, bh);
+    let x = bx + 0.006 * W, s = seed;
+    ctx.fillStyle = '#111111';
+    while (x < bx + bw - 0.008 * W) {
+      s = (Math.imul(s, 1103515245) + 12345) >>> 0;
+      const wbar = (s % 3 + 1) * 0.0022 * W;
+      if ((s >> 3) % 3 !== 0) ctx.fillRect(x, by + 0.016 * H, wbar, bh - 0.022 * H);
+      x += wbar + 0.0022 * W;
+    }
+    ctx.font = `${Math.max(11, 0.013 * H)}px ${FONTS.anton.css}`;
+    ctx.textAlign = 'center'; ctx.fillStyle = '#111111';
+    let digits = '';
+    let d = seed;
+    for (let i = 0; i < 11; i++) { d = (Math.imul(d, 1103515245) + 12345) >>> 0; digits += String(d % 10); }
+    ctx.fillText('6 ' + digits.slice(0, 5) + ' ' + digits.slice(5), bx + bw / 2, by + 0.011 * H);
+    ctx.restore();
+  }
+
+  // cast chips (top-left of each panel; skipped when they would hit the title or ribbon)
+  for (const r of rects) {
+    if (r.bg) continue;
+    const panel = state.panels[r.panel];
+    if (!panel.tag) continue;
+    const fs = Math.max(11, 0.016 * H);
+    ctx.save();
+    ctx.font = `${fs}px ${FONTS.anton.css}`;
+    const tw = ctx.measureText(panel.tag.toUpperCase()).width;
+    const cw = tw + 0.02 * W, ch = Math.max(20, 0.030 * H);
+    const chip = { x: r.x + 0.008 * W, y: r.y + 0.008 * H, w: cw, h: ch };
+    const hit = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+    if (hit(chip, titleRect) || (ribbonRect && hit(chip, ribbonRect))) { ctx.restore(); continue; }
+    ctx.fillStyle = 'rgba(12,6,24,0.78)';
+    ctx.beginPath(); ctx.roundRect(chip.x, chip.y, chip.w, chip.h, ch / 2); ctx.fill();
+    ctx.fillStyle = '#ffffff'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    ctx.fillText(panel.tag.toUpperCase(), chip.x + 0.01 * W, chip.y + ch / 2 + 1);
+    ctx.restore();
+  }
+
+  // grain + vignette
+  if (T.grain) {
+    ctx.save(); ctx.globalAlpha = 0.05; ctx.globalCompositeOperation = 'overlay';
+    ctx.fillStyle = ctx.createPattern(getNoise(), 'repeat'); ctx.fillRect(0, 0, W, H); ctx.restore();
+  }
+  if (T.vignette) {
+    ctx.save();
+    const vg = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.42, W / 2, H / 2, Math.max(W, H) * 0.75);
+    vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,0.30)');
+    ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H); ctx.restore();
+  }
+
+  // preview-only markers (never in exports / shot mode)
+  if (!clean) {
+    const sel = rects.find(r => r.panel === state.selected);
     if (sel) {
       ctx.save();
-      ctx.strokeStyle = GOLD;
-      ctx.lineWidth = Math.max(3, W * 0.003);
-      roundRectPath(ctx, sel.x - 3, sel.y - 3, sel.w + 6, sel.h + 6, 10);
-      ctx.stroke();
+      ctx.strokeStyle = '#ffd23d'; ctx.lineWidth = Math.max(3, 0.004 * W);
+      ctx.strokeRect(sel.x - 3, sel.y - 3, sel.w + 6, sel.h + 6);
+      const p = state.panels[state.selected];
+      if (p.pin) {
+        const px = sel.x + sel.w / 2, py = sel.y + sel.h / 2;
+        ctx.strokeStyle = '#2ee6c8'; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.arc(px, py, Math.max(10, 0.012 * W), 0, Math.PI * 2); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(px - 14, py); ctx.lineTo(px + 14, py); ctx.moveTo(px, py - 14); ctx.lineTo(px, py + 14); ctx.stroke();
+      }
       ctx.restore();
     }
   }
-
-  ctx.restore();
-  return { geo, wins };
+  return { titleRect, ribbonRect };
 }
 
-let lastRender = null;
-let exportClean = false; // shot-cover mode renders without editor markers
+/* ---------- preview, interaction, UI ---------- */
+const preview = $('#preview');
+const pctx = preview.getContext('2d');
+
+function aspectSize() {
+  if (aspect === '1:1') return [960, 960];
+  if (aspect === '4:5') return [864, 1080];
+  return [960, 540];
+}
 function render() {
-  const canvas = $('stage');
-  const ctx = canvas.getContext('2d');
-  lastRender = renderCover(ctx, canvas.width, canvas.height, { forExport: exportClean });
-  $('panelLabel').textContent = 'Panel ' + (state.selected + 1) + ' · ' + state.panels[state.selected].tag;
-}
-
-/* ------------------------------------------------------------------ */
-/* Export                                                             */
-/* ------------------------------------------------------------------ */
-
-function renderOffscreen(w, h) {
-  const c = document.createElement('canvas');
-  c.width = w; c.height = h;
-  renderCover(c.getContext('2d'), w, h, { forExport: true });
-  return c;
-}
-
-function exportPNG(sizeKey) {
-  const [w, h] = SIZES[sizeKey] || SIZES['1920x1080'];
-  return new Promise(resolve => {
-    const c = renderOffscreen(w, h);
-    c.toBlob(blob => {
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'vice-cover-' + sizeKey + '.png';
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 4000);
-      resolve({ w, h, bytes: blob.size });
-    }, 'image/png');
-  });
-}
-
-// Test hook: renders an export and hands the PNG back as a data URL.
-window.__viceExport = function (sizeKey) {
-  return new Promise(resolve => {
-    const [w, h] = SIZES[sizeKey] || SIZES['1920x1080'];
-    const c = renderOffscreen(w, h);
-    resolve({ dataUrl: c.toDataURL('image/png'), w, h });
-  });
-};
-window.__viceReady = false;
-
-/* ------------------------------------------------------------------ */
-/* Photo loading                                                      */
-/* ------------------------------------------------------------------ */
-
-function loadImage(src) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error('cannot load ' + src));
-    img.src = src;
-  });
-}
-
-async function initPhotos() {
-  for (const def of SAMPLES) {
-    try {
-      const img = await loadImage(def.file);
-      photos.set(def.key, { key: def.key, label: def.label, img, src: def.file });
-    } catch (e) { /* sample missing: keep the slot, it renders empty */ }
-  }
-  buildSampleStrip();
-  buildPhotoSelect();
-  render();
-}
-
-/* ------------------------------------------------------------------ */
-/* UI construction                                                    */
-/* ------------------------------------------------------------------ */
-
-function buildLayoutChips() {
-  const row = $('layoutRow');
-  row.innerHTML = '';
-  LAYOUTS.forEach((L, i) => {
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.textContent = (i + 1) + ' · ' + L.name;
-    b.classList.toggle('on', state.layout === L.id);
-    b.addEventListener('click', () => { pushHistory(); state.layout = L.id; buildLayoutChips(); render(); });
-    row.appendChild(b);
-  });
-}
-
-function buildGradeChips() {
-  const row = $('gradeRow');
-  row.innerHTML = '';
-  GRADES.forEach(gr => {
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.textContent = gr.name;
-    b.classList.toggle('on', state.grade === gr.id);
-    b.addEventListener('click', () => { pushHistory(); state.grade = gr.id; buildGradeChips(); render(); });
-    row.appendChild(b);
-  });
-}
-
-function buildPaletteSwatches() {
-  const row = $('paletteRow');
-  row.innerHTML = '';
-  PALETTES.forEach(p => {
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.title = p.name;
-    b.setAttribute('aria-label', p.name + ' chrome');
-    b.style.background = 'linear-gradient(180deg,' + p.stripes.join(',') + ')';
-    b.classList.toggle('on', state.palette === p.id);
-    b.addEventListener('click', () => { pushHistory(); state.palette = p.id; buildPaletteSwatches(); render(); });
-    row.appendChild(b);
-  });
-}
-
-function buildSampleStrip() {
-  const strip = $('sampleStrip');
-  strip.innerHTML = '';
-  SAMPLES.forEach(def => {
-    const rec = photos.get(def.key);
-    if (!rec) return;
-    const fig = document.createElement('figure');
-    fig.dataset.key = def.key;
-    if (pendingPhoto === def.key) fig.classList.add('on');
-    const img = document.createElement('img');
-    img.src = def.file;
-    img.alt = def.label;
-    const cap = document.createElement('figcaption');
-    cap.textContent = def.label;
-    fig.append(img, cap);
-    fig.addEventListener('click', () => {
-      pendingPhoto = def.key;
-      buildSampleStrip(); buildPhotoStrip();
-      document.querySelectorAll('#sampleStrip figure, #photoStrip figure').forEach(f => f.classList.toggle('on', f.dataset.key === pendingPhoto));
-    });
-    strip.appendChild(fig);
-  });
-}
-
-function buildPhotoStrip() {
-  const strip = $('photoStrip');
-  strip.innerHTML = '';
-  photos.forEach(rec => {
-    if (rec.key.startsWith('s-')) return; // samples live in their own strip
-    const fig = document.createElement('figure');
-    fig.dataset.key = rec.key;
-    if (pendingPhoto === rec.key) fig.classList.add('on');
-    const img = document.createElement('img');
-    img.src = rec.src;
-    img.alt = rec.label;
-    const cap = document.createElement('figcaption');
-    cap.textContent = rec.label;
-    fig.append(img, cap);
-    fig.addEventListener('click', () => {
-      pendingPhoto = rec.key;
-      buildPhotoStrip(); buildSampleStrip();
-    });
-    strip.appendChild(fig);
-  });
-}
-
-// Options are keyed by the Map key itself — never by a property of the record.
-function buildPhotoSelect() {
-  const sel = $('selPhoto');
-  sel.innerHTML = '';
-  photos.forEach((rec, key) => {
-    const opt = document.createElement('option');
-    opt.value = key;
-    opt.textContent = rec.label;
-    sel.appendChild(opt);
-  });
-  sel.value = state.panels[state.selected].photo;
-}
-
-function syncAllInputs() {
-  $('inTitle').value = state.title;
-  $('inTagline').value = state.tagline;
-  $('inBilling').value = state.billing;
-  $('inQuote').value = state.quote;
-  $('inGazette').value = state.gazette;
-  $('titleCount').textContent = state.title.length + ' / 24';
-  $('billCount').textContent = state.billing.length + ' / 90';
-  $('inFont').value = state.font;
+  const [w, h] = aspectSize();
+  if (preview.width !== w || preview.height !== h) { preview.width = w; preview.height = h; }
+  drawCover(pctx, w, h, { clean: false });
   const p = state.panels[state.selected];
-  $('inZoom').value = p.zoom;
-  $('zoomVal').textContent = p.zoom.toFixed(2) + '×';
-  $('inTag').value = p.tag;
-  buildLayoutChips(); buildGradeChips(); buildPaletteSwatches(); buildPhotoSelect();
-  ['Frame', 'Masthead', 'Seal', 'Billing', 'Coming', 'Grain', 'Vignette'].forEach(name => {
-    const el = $('tg' + name);
-    if (el) el.checked = !!state.show[name.toLowerCase()];
-  });
-  $('btnMarkFace').setAttribute('aria-pressed', pinMode ? 'true' : 'false');
-  $('stage').classList.toggle('pin-mode', pinMode);
+  $('#panelLabel').textContent = `Panel ${state.selected + 1} · ${p.tag || 'UNTITLED'}`;
 }
 
-function syncUndoButtons() {
-  $('btnUndo').disabled = histIndex <= 0;
-  $('btnRedo').disabled = histIndex >= history.length - 1;
-}
-
-function setPanelPhoto(slot, key) {
-  if (!photos.has(key)) return;
-  pushHistory();
-  const p = state.panels[slot];
-  p.photo = key;
-  const def = SAMPLES.find(s => s.key === key);
-  if (def) { p.face = [...def.face]; p.ox = 0; p.oy = 0; p.zoom = 1; }
-  buildPhotoSelect();
-  syncAllInputs();
-  render();
-}
-
-/* ------------------------------------------------------------------ */
-/* Canvas interaction                                                 */
-/* ------------------------------------------------------------------ */
-
-function canvasPoint(ev) {
-  const canvas = $('stage');
-  const r = canvas.getBoundingClientRect();
-  return {
-    x: (ev.clientX - r.left) * (canvas.width / r.width),
-    y: (ev.clientY - r.top) * (canvas.height / r.height),
-  };
-}
-
-function hitPanel(pt) {
-  if (!lastRender) return -1;
-  const list = lastRender.geo.panels;
-  for (let i = list.length - 1; i >= 0; i--) {
-    const p = list[i];
-    if (pt.x >= p.x && pt.x <= p.x + p.w && pt.y >= p.y && pt.y <= p.y + p.h) return p.slot;
+function syncUI() {
+  $('#inTitle').value = state.title;
+  $('#inTagline').value = state.tagline;
+  $('#inBilling').value = state.billing;
+  $('#inQuote').value = state.quote;
+  $('#inGazette').value = state.gazette;
+  $('#inFont').value = state.font;
+  $('#titleCount').textContent = `${state.title.length} / 24`;
+  $('#billCount').textContent = `${state.billing.length} / 90`;
+  const p = state.panels[state.selected];
+  $('#inTag').value = p.tag;
+  $('#inZoom').value = p.zoom;
+  $('#zoomVal').textContent = `${p.zoom.toFixed(2)}×`;
+  $('#tgFrame').checked = state.toggles.frame;
+  $('#tgMasthead').checked = state.toggles.masthead;
+  $('#tgSeal').checked = state.toggles.seal;
+  $('#tgBilling').checked = state.toggles.billing;
+  $('#tgSoon').checked = state.toggles.soon;
+  $('#tgGrain').checked = state.toggles.grain;
+  $('#tgVignette').checked = state.toggles.vignette;
+  document.querySelectorAll('#layoutRow .chip').forEach(c => c.classList.toggle('on', c.dataset.value === state.layout));
+  document.querySelectorAll('#gradeRow .chip').forEach(c => c.classList.toggle('on', c.dataset.value === state.grade));
+  document.querySelectorAll('#chromeRow .swatch').forEach(s => s.classList.toggle('on', s.dataset.value === state.chrome));
+  document.querySelectorAll('#sampleStrip figure').forEach(f => f.classList.toggle('on', f.dataset.key === p.photo));
+  const sel = $('#inPanelPhoto');
+  sel.innerHTML = '';
+  for (const [key, rec] of photos) {
+    const o = document.createElement('option');
+    o.value = key; o.textContent = rec.label;   // Map key as the option value (never a .id property)
+    if (key === p.photo) o.selected = true;
+    sel.appendChild(o);
   }
-  return -1;
 }
 
-function setFaceFromPoint(slot, pt) {
-  const entry = lastRender && lastRender.wins.get(slot);
-  if (!entry) return;
-  const { rect, win, img } = entry;
-  const fx = (win.sx + ((pt.x - rect.x) / rect.w) * win.sw) / img.naturalWidth;
-  const fy = (win.sy + ((pt.y - rect.y) / rect.h) * win.sh) / img.naturalHeight;
-  pushHistory();
-  state.panels[slot].face = [clamp(fx, 0, 1), clamp(fy, 0, 1)];
-  state.panels[slot].ox = 0;
-  state.panels[slot].oy = 0;
+function buildChips() {
+  const lr = $('#layoutRow'); lr.innerHTML = '';
+  for (const l of LAYOUTS) {
+    const b = document.createElement('button');
+    b.className = 'chip'; b.dataset.value = l; b.textContent = LAYOUT_LABELS[l];
+    b.onclick = () => { commit(); state.layout = l; const rs = rectsFor(preview.width, preview.height); if (!rs.some(r => r.panel === state.selected)) state.selected = 0; syncUI(); render(); };
+    lr.appendChild(b);
+  }
+  const gr = $('#gradeRow'); gr.innerHTML = '';
+  for (const [k, g] of Object.entries(GRADES)) {
+    const b = document.createElement('button');
+    b.className = 'chip'; b.dataset.value = k; b.textContent = g.label;
+    b.onclick = () => { commit(); state.grade = k; syncUI(); render(); };
+    gr.appendChild(b);
+  }
+  const cr = $('#chromeRow'); cr.innerHTML = '';
+  for (const [k, c] of Object.entries(CHROMES)) {
+    const s = document.createElement('span');
+    s.className = 'swatch'; s.dataset.value = k; s.title = c.label;
+    s.style.background = `linear-gradient(180deg, ${c.stops.map(st => st[1]).join(',')})`;
+    s.onclick = () => { commit(); state.chrome = k; syncUI(); render(); };
+    cr.appendChild(s);
+  }
+}
+
+function buildSamples() {
+  const strip = $('#sampleStrip'); strip.innerHTML = '';
+  for (const s of SAMPLES) {
+    const f = document.createElement('figure');
+    f.dataset.key = s.key;
+    const im = document.createElement('img');
+    im.src = s.file; im.alt = s.label;
+    const cap = document.createElement('figcaption');
+    cap.textContent = s.label;
+    f.appendChild(im); f.appendChild(cap);
+    f.onclick = () => {
+      pendingThumb = s.key;
+      document.querySelectorAll('#sampleStrip figure').forEach(x => x.classList.toggle('on', x === f));
+    };
+    strip.appendChild(f);
+  }
+}
+
+function panelAt(cx, cy) {
+  const [w, h] = aspectSize();
+  const scaleX = preview.width / preview.clientWidth, scaleY = preview.height / preview.clientHeight;
+  const rect = preview.getBoundingClientRect();
+  const px = (cx - rect.left) * scaleX, py = (cy - rect.top) * scaleY;
+  const rs = rectsFor(preview.width, preview.height);
+  return rs.find(r => px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h) || null;
+}
+function photoPointInPanel(panelIdx, cx, cy) {
+  const rect = preview.getBoundingClientRect();
+  const rs = rectsFor(preview.width, preview.height);
+  const r = rs.find(x => x.panel === panelIdx);
+  if (!r) return null;
+  const px = (cx - rect.left) * (preview.width / preview.clientWidth);
+  const py = (cy - rect.top) * (preview.height / preview.clientHeight);
+  const panel = state.panels[panelIdx];
+  const rec = photos.get(panel.photo);
+  if (!rec) return null;
+  // invert the cover-fit math: find the image point under the cursor
+  const scale = Math.max(r.w / rec.img.width, r.h / rec.img.height) * (panel.zoom || 1);
+  const sw = r.w / scale, sh = r.h / scale;
+  let ccx, ccy;
+  if (panel.pin) { ccx = panel.pin[0] * rec.img.width; ccy = panel.pin[1] * rec.img.height; }
+  else { ccx = rec.img.width / 2; ccy = rec.img.height / 2; }
+  ccx += (panel.ox || 0) * rec.img.width * 0.22;
+  ccy += (panel.oy || 0) * rec.img.height * 0.22;
+  ccx = clamp(ccx, sw / 2, rec.img.width - sw / 2);
+  ccy = clamp(ccy, sh / 2, rec.img.height - sh / 2);
+  return [clamp((ccx - sw / 2 + ((px - r.x) / r.w) * sw) / rec.img.width, 0, 1),
+          clamp((ccy - sh / 2 + ((py - r.y) / r.h) * sh) / rec.img.height, 0, 1)];
+}
+
+preview.addEventListener('pointerdown', (e) => {
+  const r = panelAt(e.clientX, e.clientY);
+  if (!r) return;
+  preview.setPointerCapture(e.pointerId);
+  if (e.altKey) {
+    const pt = photoPointInPanel(r.panel, e.clientX, e.clientY);
+    if (pt) { commit(); state.panels[r.panel].pin = pt; state.panels[r.panel].ox = 0; state.panels[r.panel].oy = 0; state.selected = r.panel; syncUI(); render(); }
+    return;
+  }
+  if (markingFace) {
+    const pt = photoPointInPanel(r.panel, e.clientX, e.clientY);
+    if (pt) { commit(); state.panels[r.panel].pin = pt; state.panels[r.panel].ox = 0; state.panels[r.panel].oy = 0; }
+    markingFace = false; $('#btnMarkFace').textContent = 'Mark face here';
+    syncUI(); render(); return;
+  }
+  if (pendingThumb) {
+    commit(); state.panels[r.panel].photo = pendingThumb;
+    const s = SAMPLES.find(x => x.key === pendingThumb);
+    if (s) state.panels[r.panel].pin = s.pin.slice();
+    state.panels[r.panel].ox = 0; state.panels[r.panel].oy = 0;
+    state.selected = r.panel; pendingThumb = null; syncUI(); render(); return;
+  }
+  state.selected = r.panel; syncUI(); render();
+  drag = { x: e.clientX, y: e.clientY, panel: r.panel, ox: state.panels[r.panel].ox, oy: state.panels[r.panel].oy, moved: false };
+  undoStack.push(snapshot()); if (undoStack.length > 60) undoStack.shift(); redoStack.length = 0;
+});
+preview.addEventListener('pointermove', (e) => {
+  if (!drag) return;
+  const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+  if (Math.abs(dx) + Math.abs(dy) > 4) drag.moved = true;
+  if (!drag.moved) return;
+  const rect = preview.getBoundingClientRect();
+  const p = state.panels[drag.panel];
+  p.ox = clamp(drag.ox + (dx / rect.width) * 1.6, -1, 1);
+  p.oy = clamp(drag.oy + (dy / rect.height) * 1.6, -1, 1);
   render();
+});
+preview.addEventListener('pointerup', () => {
+  if (drag && !drag.moved) { undoStack.pop(); } // a plain click is not a change: drop the pre-drag snapshot
+  drag = null;
+});
+
+/* ---------- export ---------- */
+function exportPNG(w, h) {
+  const off = document.createElement('canvas');
+  off.width = w; off.height = h;
+  drawCover(off.getContext('2d'), w, h, { clean: true });
+  off.toBlob((blob) => {
+    if (!blob) return;
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `vice-cover-${w}x${h}.png`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  }, 'image/png');
+  return off;
 }
+window.__viceExport = function (w, h) {
+  const off = document.createElement('canvas');
+  off.width = w; off.height = h;
+  drawCover(off.getContext('2d'), w, h, { clean: true });
+  return off.toDataURL('image/png');
+};
+document.querySelectorAll('.export').forEach(b => b.addEventListener('click', () => {
+  const [w, h] = b.dataset.export.split('x').map(Number);
+  window.__viceExported = true;
+  exportPNG(w, h);
+}));
 
-let drag = null;
-function bindCanvas() {
-  const canvas = $('stage');
-  canvas.addEventListener('pointerdown', ev => {
-    const pt = canvasPoint(ev);
-    const slot = hitPanel(pt);
-    if (slot < 0) return;
-    canvas.setPointerCapture(ev.pointerId);
-    if (pendingPhoto) {
-      setPanelPhoto(slot, pendingPhoto);
-      pendingPhoto = null;
-      buildSampleStrip(); buildPhotoStrip();
-      return;
-    }
-    state.selected = slot;
-    if (pinMode || ev.altKey) {
-      setFaceFromPoint(slot, pt);
-      pinMode = false;
-      syncAllInputs();
-      return;
-    }
-    const panel = state.panels[slot];
-    drag = { slot, startX: pt.x, startY: pt.y, ox: panel.ox, oy: panel.oy, moved: false };
-    pushHistory();
-    syncAllInputs();
-    render();
-  });
-  canvas.addEventListener('pointermove', ev => {
-    if (!drag) return;
-    const pt = canvasPoint(ev);
-    const entry = lastRender && lastRender.wins.get(drag.slot);
-    if (!entry) return;
-    const panel = state.panels[drag.slot];
-    const dx = pt.x - drag.startX, dy = pt.y - drag.startY;
-    if (Math.abs(dx) + Math.abs(dy) > 2) drag.moved = true;
-    const fx = entry.win.sw / entry.img.naturalWidth;
-    const fy = entry.win.sh / entry.img.naturalHeight;
-    panel.ox = clamp(drag.ox - (dx / entry.rect.w) * fx, -0.6, 0.6);
-    panel.oy = clamp(drag.oy - (dy / entry.rect.h) * fy, -0.6, 0.6);
-    render();
-  });
-  canvas.addEventListener('pointerup', () => { drag = null; });
-  canvas.addEventListener('pointercancel', () => { drag = null; });
+/* ---------- controls ---------- */
+function bind(id, fn) { $(id).addEventListener('input', fn); }
+bind('#inTitle', (e) => { state.title = e.target.value.toUpperCase() || 'VICE'; $('#titleCount').textContent = `${state.title.length} / 24`; render(); });
+bind('#inTagline', (e) => { state.tagline = e.target.value; render(); });
+bind('#inBilling', (e) => { state.billing = e.target.value; $('#billCount').textContent = `${state.billing.length} / 90`; render(); });
+bind('#inQuote', (e) => { state.quote = e.target.value; render(); });
+bind('#inGazette', (e) => { state.gazette = e.target.value; render(); });
+bind('#inFont', (e) => { commit(); state.font = e.target.value; render(); });
+bind('#inTag', (e) => { state.panels[state.selected].tag = e.target.value.toUpperCase(); render(); });
+bind('#inZoom', (e) => { state.panels[state.selected].zoom = parseFloat(e.target.value); $('#zoomVal').textContent = `${state.panels[state.selected].zoom.toFixed(2)}×`; render(); });
+bind('#inPanelPhoto', (e) => {
+  commit();
+  const p = state.panels[state.selected];
+  p.photo = e.target.value;
+  const s = SAMPLES.find(x => x.key === e.target.value);
+  if (s) p.pin = s.pin.slice();
+  p.ox = 0; p.oy = 0; render();
+});
+for (const [key, id] of [['frame', '#tgFrame'], ['masthead', '#tgMasthead'], ['seal', '#tgSeal'], ['billing', '#tgBilling'], ['soon', '#tgSoon'], ['grain', '#tgGrain'], ['vignette', '#tgVignette']]) {
+  $(id).addEventListener('change', (e) => { commit(); state.toggles[key] = e.target.checked; render(); });
 }
-
-/* ------------------------------------------------------------------ */
-/* Wiring                                                             */
-/* ------------------------------------------------------------------ */
-
-function photoKeys() { return [...photos.keys()]; }
-function cyclePhoto(dir) {
-  const keys = photoKeys();
-  const cur = state.panels[state.selected].photo;
-  let i = keys.indexOf(cur);
-  i = (i + dir + keys.length) % keys.length;
-  setPanelPhoto(state.selected, keys[i]);
+$('#btnSurprise').onclick = () => {
+  commit();
+  state.layout = LAYOUTS[Math.floor(Math.random() * LAYOUTS.length)];
+  const gk = Object.keys(GRADES); state.grade = gk[Math.floor(Math.random() * gk.length)];
+  const ck = Object.keys(CHROMES); state.chrome = ck[Math.floor(Math.random() * ck.length)];
+  const keys = [...photos.keys()];
+  state.panels.forEach(p => { p.photo = keys[Math.floor(Math.random() * keys.length)]; p.ox = 0; p.oy = 0; });
+  syncUI(); render();
+};
+$('#btnAuto').onclick = () => {
+  commit();
+  const distinct = new Set(state.panels.map(p => p.photo)).size;
+  state.layout = distinct >= 9 ? 'mosaic' : distinct >= 7 ? 'poster' : distinct >= 4 ? 'grid' : 'hero-left';
+  syncUI(); render();
+};
+$('#btnUndo').onclick = doUndo;
+$('#btnRedo').onclick = doRedo;
+$('#btnFillAll').onclick = () => { commit(); const ph = state.panels[state.selected].photo; state.panels.forEach(p => { p.photo = ph; p.ox = 0; p.oy = 0; }); render(); };
+$('#btnShuffle').onclick = () => {
+  commit();
+  const keys = [...photos.keys()];
+  state.panels.forEach(p => { p.photo = keys[Math.floor(Math.random() * keys.length)]; p.ox = 0; p.oy = 0; });
+  syncUI(); render();
+};
+$('#btnPrevPhoto').onclick = () => stepPhoto(-1);
+$('#btnNextPhoto').onclick = () => stepPhoto(1);
+function stepPhoto(d) {
+  commit();
+  const keys = [...photos.keys()];
+  const p = state.panels[state.selected];
+  const i = (keys.indexOf(p.photo) + d + keys.length) % keys.length;
+  p.photo = keys[i];
+  const s = SAMPLES.find(x => x.key === keys[i]);
+  if (s) p.pin = s.pin.slice();
+  p.ox = 0; p.oy = 0; syncUI(); render();
 }
+$('#btnMarkFace').onclick = () => {
+  markingFace = !markingFace;
+  $('#btnMarkFace').textContent = markingFace ? 'Click a face…' : 'Mark face here';
+};
+$('#btnClearPin').onclick = () => { commit(); state.panels[state.selected].pin = null; render(); };
+$('#fileInput').addEventListener('change', async (e) => {
+  const files = [...e.target.files];
+  for (const f of files) {
+    const url = URL.createObjectURL(f);
+    try {
+      const img = await loadImage(url);
+      const key = 'u-' + Math.random().toString(36).slice(2, 8);
+      photos.set(key, { img, label: f.name.replace(/\.[^.]+$/, '').slice(0, 18) || 'Upload' });
+    } catch (err) { console.warn('upload failed', f.name); }
+  }
+  syncUI(); render();
+});
+document.querySelectorAll('.aspect').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('.aspect').forEach(x => x.classList.toggle('on', x === b));
+  aspect = b.dataset.aspect; render();
+}));
+document.addEventListener('keydown', (e) => {
+  if (e.target.matches('input,select,textarea')) return;
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? doRedo() : doUndo(); return; }
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); doRedo(); return; }
+  const k = e.key.toLowerCase();
+  if (k === 's') $('#btnSurprise').click();
+  else if (k === 'a') $('#btnAuto').click();
+  else if (/^[1-9]$/.test(k)) { commit(); state.layout = LAYOUTS[parseInt(k, 10) - 1]; syncUI(); render(); }
+});
 
-function surprise() {
-  pushHistory();
-  state.layout = LAYOUTS[Math.floor(Math.random() * LAYOUTS.length)].id;
-  state.grade = GRADES[Math.floor(Math.random() * GRADES.length)].id;
-  state.palette = PALETTES[Math.floor(Math.random() * PALETTES.length)].id;
-  syncAllInputs();
-  render();
-}
-
-function autoLayout() {
-  pushHistory();
-  const hero = photos.get(state.panels[0].photo);
-  const portrait = hero && hero.img && hero.img.naturalHeight > hero.img.naturalWidth * 1.15;
-  state.layout = portrait ? 'hero-left' : 'poster';
-  syncAllInputs();
-  render();
-}
-
-function bindUI() {
-  $('inTitle').addEventListener('input', e => { state.title = e.target.value; $('titleCount').textContent = state.title.length + ' / 24'; render(); });
-  $('inTitle').addEventListener('change', pushHistory);
-  $('inTagline').addEventListener('input', e => { state.tagline = e.target.value; render(); });
-  $('inTagline').addEventListener('change', pushHistory);
-  $('inBilling').addEventListener('input', e => { state.billing = e.target.value; $('billCount').textContent = state.billing.length + ' / 90'; render(); });
-  $('inBilling').addEventListener('change', pushHistory);
-  $('inQuote').addEventListener('input', e => { state.quote = e.target.value; render(); });
-  $('inQuote').addEventListener('change', pushHistory);
-  $('inGazette').addEventListener('input', e => { state.gazette = e.target.value; render(); });
-  $('inGazette').addEventListener('change', pushHistory);
-  $('inFont').addEventListener('change', e => { pushHistory(); state.font = e.target.value; render(); });
-  $('inZoom').addEventListener('input', e => {
-    state.panels[state.selected].zoom = parseFloat(e.target.value);
-    $('zoomVal').textContent = state.panels[state.selected].zoom.toFixed(2) + '×';
-    render();
-  });
-  $('inZoom').addEventListener('change', pushHistory);
-  $('inTag').addEventListener('input', e => { state.panels[state.selected].tag = e.target.value.toUpperCase().slice(0, 18); render(); });
-  $('inTag').addEventListener('change', pushHistory);
-  $('selPhoto').addEventListener('change', e => setPanelPhoto(state.selected, e.target.value));
-  $('btnPrevPhoto').addEventListener('click', () => cyclePhoto(-1));
-  $('btnNextPhoto').addEventListener('click', () => cyclePhoto(1));
-  $('btnMarkFace').addEventListener('click', () => { pinMode = !pinMode; syncAllInputs(); });
-  $('btnClearFace').addEventListener('click', () => { pushHistory(); state.panels[state.selected].face = null; render(); });
-  $('btnSurprise').addEventListener('click', surprise);
-  $('btnAuto').addEventListener('click', autoLayout);
-  $('btnUndo').addEventListener('click', undo);
-  $('btnRedo').addEventListener('click', redo);
-  document.querySelectorAll('.export').forEach(b => {
-    b.addEventListener('click', () => exportPNG(b.dataset.export));
-  });
-  document.querySelectorAll('.aspect-btns button').forEach(b => {
-    b.addEventListener('click', () => {
-      document.querySelectorAll('.aspect-btns button').forEach(x => x.classList.remove('on'));
-      b.classList.add('on');
-      const [w, h] = SIZES[b.dataset.aspect === '16x9' ? '1920x1080' : b.dataset.aspect === '1x1' ? '1080x1080' : '1080x1350'];
-      const canvas = $('stage');
-      canvas.width = w; canvas.height = h;
-      render();
-    });
-  });
-  ['Frame', 'Masthead', 'Seal', 'Billing', 'Coming', 'Grain', 'Vignette'].forEach(name => {
-    $('tg' + name).addEventListener('change', e => {
-      pushHistory();
-      state.show[name.toLowerCase()] = e.target.checked;
-      render();
-    });
-  });
-  $('fileInput').addEventListener('change', async e => {
-    for (const file of e.target.files) {
-      if (!file.type.startsWith('image/')) continue;
-      const url = URL.createObjectURL(file);
-      try {
-        const img = await loadImage(url);
-        const key = 'u' + (++uploadCount);
-        photos.set(key, { key, label: file.name.replace(/\.[^.]+$/, '').slice(0, 18) || 'Upload', img, src: url });
-      } catch (err) { URL.revokeObjectURL(url); }
-    }
-    e.target.value = '';
-    buildPhotoStrip(); buildPhotoSelect();
-    render();
-  });
-  $('btnFillAll').addEventListener('click', () => {
-    const key = pendingPhoto || state.panels[state.selected].photo;
-    if (!photos.has(key)) return;
-    pushHistory();
-    state.panels.forEach(p => { p.photo = key; });
-    pendingPhoto = null;
-    buildSampleStrip(); buildPhotoStrip();
-    render();
-  });
-  $('btnShuffle').addEventListener('click', () => {
-    const keys = photoKeys();
-    pushHistory();
-    state.panels.forEach(p => { p.photo = keys[Math.floor(Math.random() * keys.length)]; });
-    render();
-  });
-  document.addEventListener('keydown', e => {
-    const tag = (e.target.tagName || '').toLowerCase();
-    if (tag === 'input' || tag === 'select' || tag === 'textarea') return;
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); return; }
-    if (e.key === 's' || e.key === 'S') surprise();
-    else if (e.key === 'a' || e.key === 'A') autoLayout();
-    else if (/^[1-9]$/.test(e.key)) {
-      const L = LAYOUTS[parseInt(e.key, 10) - 1];
-      if (L) { pushHistory(); state.layout = L.id; syncAllInputs(); render(); }
-    }
-  });
-  bindCanvas();
-}
-
-/* ------------------------------------------------------------------ */
-/* Boot                                                               */
-/* ------------------------------------------------------------------ */
-
-function shotMode() {
+/* ---------- shot mode (clean fullscreen cover for screenshots) ---------- */
+function shotSize() {
   const q = new URLSearchParams(location.search);
-  return q.get('shot') || null;
+  const w = parseInt(q.get('w') || '0', 10), h = parseInt(q.get('h') || '0', 10);
+  if (w > 0 && h > 0) return [w, h];
+  if (q.get('aspect') === '1:1') return [1080, 1080];
+  if (q.get('aspect') === '4:5') return [1080, 1350];
+  return [1920, 1080];
 }
 
+/* ---------- boot ---------- */
 async function boot() {
-  buildLayoutChips();
-  buildGradeChips();
-  buildPaletteSwatches();
-  bindUI();
-  pushHistory();
-  syncAllInputs();
-  const fonts = FONTS.map(f => document.fonts.load(`40px "${f}"`).catch(() => null));
-  await Promise.all(fonts);
-  await initPhotos();
-  const shot = shotMode();
-  if (shot === 'cover') {
-    const ratio = new URLSearchParams(location.search).get('ratio') || '16x9';
-    const [w, h] = SIZES[ratio === '1x1' ? '1080x1080' : ratio === '4x5' ? '1080x1350' : '1920x1080'];
-    const canvas = $('stage');
-    canvas.width = w; canvas.height = h;
-    document.body.classList.add('shot-cover');
-    exportClean = true;
-    render();
+  buildChips(); buildSamples();
+  await loadSamples();
+  try {
+    await Promise.all(Object.values(FONTS).map(f => document.fonts.load(`40px "${f.label}"`)));
+    await document.fonts.ready;
+  } catch (e) { /* fall back to system fonts */ }
+  syncUI();
+  const q = new URLSearchParams(location.search);
+  if (q.get('shot') === 'cover') {
+    document.body.classList.add('shotmode');
+    const [w, h] = shotSize();
+    const c = $('#shotCanvas');
+    c.width = w; c.height = h;
+    drawCover(c.getContext('2d'), w, h, { clean: true });
   } else {
     render();
   }
   window.__viceReady = true;
 }
-
 boot();
