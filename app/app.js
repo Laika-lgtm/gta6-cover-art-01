@@ -421,8 +421,20 @@ function drawMasthead(ctx, W, H) {
     const gzRight = W / 2 + gw / 2;
     if (quoteX + qw + gap < gzLeft && gzRight + gap < bx) break;
     if (qSize > 12 * s) { qSize *= 0.92; gSize *= 0.92; continue; }
-    // last resort: shorten the quote with an ellipsis
-    if (quote.length > 4) { quote = quote.slice(0, -2) + '…'; continue; }
+    // Last resort when the cover is too narrow for the full quote even at
+    // the smallest size: on narrow covers (portrait / square) drop whole
+    // trailing words, so the masthead shows a short COMPLETE quote
+    // ("THE WILDEST RIDE") instead of a mid-word ellipsis, which reads as
+    // a defect. Wide covers keep the old ellipsis path and are untouched.
+    if (W <= H) {
+      // Drop the last word, then any trailing function words, so the short
+      // quote never dangles mid-phrase ("THE WILDEST RIDE", not
+      // "THE WILDEST RIDE OF THE").
+      let shorter = quote.replace(/\s+\S+\s*$/, '');
+      const STOP = /\s+(?:OF|THE|AND|A|AN|TO|IN|ON|FOR|WITH|AT|BY)\s*$/i;
+      while (STOP.test(shorter)) shorter = shorter.replace(STOP, '');
+      if (shorter && shorter !== quote) { quote = shorter; continue; }
+    } else if (quote.length > 4) { quote = quote.slice(0, -2) + '…'; continue; }
     break;
   }
   try { ctx.letterSpacing = '0px'; } catch (e) {}
