@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
+<title>VICE COVER — GTA-style cover art maker</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header id="topbar">
+  <div class="brand"><span class="brand-mark">VC</span><span class="brand-name">VICE COVER</span></div>
+  <p class="tagline">Turn your photos into a Vice City poster. Pick a layout, drop in photos, write the caption, export the PNG.</p>
+</header>
+
+<main id="workspace">
+  <section id="stage">
+    <div id="canvasWrap">
+      <canvas id="poster" width="1920" height="1080"></canvas>
+      <div id="dropHint">Drop photos here or use Upload below</div>
+    </div>
+    <div id="stageBar">
+      <label>Size
+        <select id="exportSize">
+          <option value="1920x1080" selected>1920 × 1080 (landscape)</option>
+          <option value="1080x1080">1080 × 1080 (square)</option>
+          <option value="1080x1350">1080 × 1350 (portrait)</option>
+        </select>
+      </label>
+      <button id="exportBtn" class="primary">Download PNG</button>
+      <span id="exportNote"></span>
+    </div>
+  </section>
+
+  <aside id="panel">
+    <section class="group">
+      <h2>1 · Layout</h2>
+      <div class="choices" id="layoutChoices">
+        <button data-layout="vice-classic" class="choice selected">Vice Classic<span>hero + 3 panels</span></button>
+        <button data-layout="neon-grid" class="choice">Neon Grid<span>2 × 2 panels</span></button>
+        <button data-layout="sunset-strip" class="choice">Sunset Strip<span>big + 2 stacked</span></button>
+      </div>
+    </section>
+
+    <section class="group">
+      <h2>2 · Photos</h2>
+      <p class="hint">Click a panel in the preview to select it, then drag the photo to move it and scroll to zoom.</p>
+      <div class="row">
+        <button id="uploadBtn">Upload photos…</button>
+        <input type="file" id="fileInput" accept="image/*" multiple hidden>
+      </div>
+      <div id="sampleRow" class="thumbs"></div>
+      <label class="check"><input type="checkbox" id="fillAll"> One photo across all panels</label>
+      <div class="sliderRow"><label>Zoom <input type="range" id="zoomRange" min="1" max="2.5" step="0.05" value="1"></label><span id="zoomVal">1.00×</span></div>
+      <div class="sliderRow"><label>Pan X <input type="range" id="panXRange" min="0" max="1" step="0.01" value="0.5"></label></div>
+      <div class="sliderRow"><label>Pan Y <input type="range" id="panYRange" min="0" max="1" step="0.01" value="0.5"></label></div>
+      <p class="hint" id="selectedLabel">Selected panel: hero</p>
+    </section>
+
+    <section class="group">
+      <h2>3 · Caption</h2>
+      <label>Caption <input type="text" id="captionInput" value="VICE CITY" maxlength="24"></label>
+      <label>Sub-caption <input type="text" id="subInput" value="SUNSET HEIST" maxlength="40"></label>
+      <div class="sliderRow"><label>Caption size <input type="range" id="capSizeRange" min="0.6" max="1.4" step="0.05" value="1"></label></div>
+      <div class="choices" id="gradeChoices">
+        <button data-grade="sunset" class="choice selected">Sunset<span>pink · orange</span></button>
+        <button data-grade="neon" class="choice">Neon<span>purple · cyan</span></button>
+        <button data-grade="noir" class="choice">Noir<span>high contrast</span></button>
+        <button data-grade="none" class="choice">Clean<span>no grade</span></button>
+      </div>
+    </section>
+
+    <section class="group">
+      <h2>4 · Export</h2>
+      <p class="hint">PNG, exactly the size you picked. Three sizes, one click each — no watermark, no upload, everything stays on your machine.</p>
+      <div class="choices" id="quickExport">
+        <button data-size="1920x1080" class="choice">1920 × 1080</button>
+        <button data-size="1080x1080" class="choice">1080 × 1080</button>
+        <button data-size="1080x1350" class="choice">1080 × 1350</button>
+      </div>
+    </section>
+  </aside>
+</main>
+
+<footer id="foot">
+  <p>VICE COVER is an original design. Fonts: Anton (SIL Open Font License). Sample photos were made with an image model for this app. No Rockstar Games artwork, logo or font is used.</p>
+</footer>
+
+<script type="module" src="src/shots.js"></script>
+<script type="module" src="src/editor.js"></script>
+</body>
+</html>
