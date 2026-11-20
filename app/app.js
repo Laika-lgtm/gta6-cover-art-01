@@ -1,1023 +1,1228 @@
-/* VICE COVER v3 — a poster maker that turns your photos into a framed crime-epic cover.
-   Everything is drawn on one canvas: panels, grades, and the full poster dressing
-   (chrome title, masthead, ribbon, seal, barcode, billing, gold frame). No network. */
+/* VICE COVER v4 — offline poster maker.
+   One canvas renderer draws every layout and every poster-dressing layer,
+   so the live preview and the exported PNG are the same picture. */
+'use strict';
 
-const $ = (id) => document.getElementById(id);
-const canvas = $("cover");
-const ctx = canvas.getContext("2d");
+/* ------------------------------------------------------------------ */
+/* Data                                                               */
+/* ------------------------------------------------------------------ */
 
-/* ---------------- photo library ---------------- */
 const SAMPLES = [
-  { id: "s-convertible", file: "samples/sample-convertible.jpg", name: "Convertible sunset", face: { x: 0.63, y: 0.17 } },
-  { id: "s-rooftop", file: "samples/sample-rooftop.jpg", name: "Rooftop dusk", face: { x: 0.47, y: 0.27 } },
-  { id: "s-neon", file: "samples/sample-couple-neon.jpg", name: "Neon couple", face: { x: 0.42, y: 0.22 } },
-  { id: "s-diner", file: "samples/sample-diner.jpg", name: "Diner night", face: { x: 0.66, y: 0.30 } },
-  { id: "s-pier", file: "samples/sample-pier-duo.jpg", name: "Pier sunset", face: { x: 0.52, y: 0.18 } },
-  { id: "s-popout", file: "samples/sample-hero-popout.jpg", name: "Orange studio", face: { x: 0.45, y: 0.13 } },
+  { key: 's-convertible', label: 'Convertible sunset', file: 'samples/sample-convertible.jpg', face: [0.62, 0.16] },
+  { key: 's-rooftop', label: 'Rooftop dusk', file: 'samples/sample-rooftop.jpg', face: [0.50, 0.22] },
+  { key: 's-couple', label: 'Neon couple', file: 'samples/sample-couple-neon.jpg', face: [0.45, 0.35] },
+  { key: 's-diner', label: 'Diner laugh', file: 'samples/sample-diner.jpg', face: [0.55, 0.38] },
+  { key: 's-pier', label: 'Pier sunset', file: 'samples/sample-pier-duo.jpg', face: [0.35, 0.30] },
+  { key: 's-popout', label: 'Studio popout', file: 'samples/sample-hero-popout.jpg', face: [0.42, 0.14] },
 ];
-const CAST_TAGS = ["THE DRIVER", "THE FIXER", "THE HEIRESS", "THE WHEELMAN", "THE LOOKOUT", "THE BOSS", "THE ROOKIE", "THE GHOST", "THE QUEEN"];
-const PHOTOS = new Map(); // id -> { img, name, sample:boolean }
-let userSeq = 0;
+
+const CAST_TAGS = ['THE DRIVER', 'THE FIXER', 'THE HEIRESS', 'THE WHEELMAN', 'THE LOOKOUT', 'THE BOSS', 'THE ROOKIE', 'THE GHOST', 'THE QUEEN'];
+
+const LAYOUTS = [
+  { id: 'poster', name: 'Poster hero' },
+  { id: 'grid', name: 'Grid 2×2' },
+  { id: 'hero-left', name: 'Hero left' },
+  { id: 'hero-top', name: 'Hero top' },
+  { id: 'full', name: 'Full bleed' },
+  { id: 'columns', name: 'Three columns' },
+  { id: 'tilted', name: 'Tilted' },
+  { id: 'mosaic', name: 'Mosaic 9' },
+  { id: 'popout', name: 'Pop-out hero' },
+];
+
+const GRADES = [
+  { id: 'neon', name: 'Neon Sunset', top: '#ff7a18', bottom: '#ff2e88', tint: '#ff5e3a' },
+  { id: 'vice', name: 'Vice Pink', top: '#ff2e88', bottom: '#7b2fff', tint: '#ff5ec4' },
+  { id: 'teal', name: 'Teal Night', top: '#00e5c7', bottom: '#0b3d91', tint: '#00b3a0' },
+  { id: 'gold', name: 'Gold Hour', top: '#ffb347', bottom: '#ff6a00', tint: '#ffc46b' },
+  { id: 'heat', name: 'Heatwave', top: '#ff3d00', bottom: '#ffb300', tint: '#ff7a00' },
+  { id: 'mono', name: 'Mono Noir', top: '#e8e8e8', bottom: '#111111', tint: '#888888' },
+  { id: 'palm', name: 'Palm Teal', top: '#00c9a7', bottom: '#005f73', tint: '#00a896' },
+  { id: 'dusk', name: 'Dusk Violet', top: '#7b2fff', bottom: '#ff5e8a', tint: '#8e6bff' },
+];
+
+const PALETTES = [
+  { id: 'sunset', name: 'Sunset', stripes: ['#ffe259', '#ffa751', '#ff5e62', '#b565ff'], edge: '#2b0a3d' },
+  { id: 'gold', name: 'Gold', stripes: ['#fff3a3', '#ffd23e', '#f5a623', '#b8860b'], edge: '#3d2b00' },
+  { id: 'pink', name: 'Pink', stripes: ['#ffd6f2', '#ff9de2', '#ff5ebc', '#c724b1'], edge: '#3d0a2e' },
+  { id: 'ice', name: 'Ice', stripes: ['#e8fbff', '#a5ecff', '#5ec8f2', '#2b6cb0'], edge: '#0a243d' },
+  { id: 'white', name: 'White', stripes: ['#ffffff', '#f2f2f2', '#d9d9d9', '#a6a6a6'], edge: '#222222' },
+];
+
+const FONTS = ['Anton', 'Bebas Neue', 'Archivo Black', 'Kaushan Script'];
+const SIZES = { '1920x1080': [1920, 1080], '1080x1080': [1080, 1080], '1080x1350': [1080, 1350] };
+const GOLD = '#f5c542';
+
+/* ------------------------------------------------------------------ */
+/* State                                                              */
+/* ------------------------------------------------------------------ */
+
+function defaultPanels() {
+  const assign = [
+    ['s-convertible', 0], ['s-rooftop', 1], ['s-couple', 2],
+    ['s-diner', 3], ['s-pier', 4], ['s-popout', 5],
+    ['s-diner', 6], ['s-rooftop', 7], ['s-couple', 8],
+  ];
+  return assign.map(([photo, tag]) => {
+    const def = SAMPLES.find(s => s.key === photo);
+    return { photo, zoom: 1, ox: 0, oy: 0, face: def ? [...def.face] : null, tag: CAST_TAGS[tag] };
+  });
+}
+
+function defaultState() {
+  return {
+    layout: 'poster', grade: 'neon', font: 'Anton', palette: 'sunset',
+    title: 'SUNSET HEIST', tagline: 'ONE LAST SCORE · ONE LONG SUNSET',
+    billing: 'A VICE COVER PICTURES PRODUCTION · STARRING YOU AND YOUR CREW',
+    quote: 'THE WILDEST RIDE OF THE SUMMER', gazette: 'THE SUNSET GAZETTE',
+    show: { frame: true, masthead: true, seal: true, billing: true, coming: true, grain: true, vignette: true },
+    panels: defaultPanels(), selected: 0,
+  };
+}
+
+let state = defaultState();
+const photos = new Map(); // key -> {key,label,img,src}
+let uploadCount = 0;
+let pendingPhoto = null;   // thumbnail chosen, waiting for a panel click
+let pinMode = false;
+
+const history = [];
+let histIndex = -1;
+function snapshot() { return JSON.stringify(state); }
+function pushHistory() {
+  history.splice(histIndex + 1);
+  history.push(snapshot());
+  if (history.length > 60) history.shift();
+  histIndex = history.length - 1;
+  syncUndoButtons();
+}
+function restoreHistory(i) {
+  state = JSON.parse(history[i]);
+  histIndex = i;
+  syncAllInputs();
+  render();
+  syncUndoButtons();
+}
+function undo() { if (histIndex > 0) restoreHistory(histIndex - 1); }
+function redo() { if (histIndex < history.length - 1) restoreHistory(histIndex + 1); }
+
+/* ------------------------------------------------------------------ */
+/* Small helpers                                                      */
+/* ------------------------------------------------------------------ */
+
+const $ = id => document.getElementById(id);
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+function hashString(str) {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return h >>> 0;
+}
+function makeRandom(seed) {
+  let s = seed >>> 0;
+  return () => { s = (Math.imul(s, 1664525) + 1013904223) >>> 0; return s / 4294967296; };
+}
+function roundRectPath(ctx, x, y, w, h, r) {
+  const rad = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + rad, y);
+  ctx.arcTo(x + w, y, x + w, y + h, rad);
+  ctx.arcTo(x + w, y + h, x, y + h, rad);
+  ctx.arcTo(x, y + h, x, y, rad);
+  ctx.arcTo(x, y, x + w, y, rad);
+  ctx.closePath();
+}
+function starPath(ctx, cx, cy, spikes, outer, inner) {
+  ctx.beginPath();
+  for (let i = 0; i < spikes * 2; i++) {
+    const r = i % 2 === 0 ? outer : inner;
+    const a = (Math.PI * i) / spikes - Math.PI / 2;
+    const x = cx + Math.cos(a) * r, y = cy + Math.sin(a) * r;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+}
+
+/* ------------------------------------------------------------------ */
+/* Layout geometry — all rectangles in canvas pixels                  */
+/* ------------------------------------------------------------------ */
+
+function contentBox(W, H) {
+  const m = Math.round(W * 0.014);
+  const top = Math.round(H * 0.075);
+  const bottom = Math.round(H * 0.885);
+  return { x: m, y: top, w: W - 2 * m, h: bottom - top };
+}
+
+// Returns { bg: slot|null, panels: [{slot,x,y,w,h,rot}] }
+function layoutRects(layout, W, H) {
+  const cb = contentBox(W, H);
+  const g = Math.round(W * 0.011);
+  const col = (x, y, w, h, slot, rot) => ({ slot, x, y, w, h, rot: rot || 0 });
+  switch (layout) {
+    case 'poster': {
+      const colW = cb.w - 2 * g;
+      const lw = Math.round(colW * 0.318);
+      const cw = colW - 2 * lw;
+      const lx = cb.x, cx = cb.x + lw + g, rx = cx + cw + g;
+      const stripH = Math.round(cb.h * 0.20);
+      const mainH = cb.h - stripH - g;
+      const topH = Math.round(mainH * 0.58);
+      const botH = mainH - topH - g;
+      const sw = Math.round((cb.w - g) / 2);
+      return { bg: null, panels: [
+        col(cx, cb.y, cw, mainH, 0),
+        col(lx, cb.y, lw, topH, 1),
+        col(lx, cb.y + topH + g, lw, botH, 2),
+        col(rx, cb.y, lw, topH, 3),
+        col(rx, cb.y + topH + g, lw, botH, 4),
+        col(cb.x, cb.y + mainH + g, sw, stripH, 5),
+        col(cb.x + sw + g, cb.y + mainH + g, sw, stripH, 6),
+      ] };
+    }
+    case 'grid': {
+      const w2 = Math.round((cb.w - g) / 2), h2 = Math.round((cb.h - g) / 2);
+      return { bg: null, panels: [
+        col(cb.x, cb.y, w2, h2, 0), col(cb.x + w2 + g, cb.y, w2, h2, 1),
+        col(cb.x, cb.y + h2 + g, w2, h2, 2), col(cb.x + w2 + g, cb.y + h2 + g, w2, h2, 3),
+      ] };
+    }
+    case 'hero-left': {
+      const bw = Math.round(cb.w * 0.56);
+      const rw = cb.w - bw - g;
+      const rx = cb.x + bw + g;
+      const h3 = Math.round((cb.h - 2 * g) / 3);
+      return { bg: null, panels: [
+        col(cb.x, cb.y, bw, cb.h, 0),
+        col(rx, cb.y, rw, h3, 1), col(rx, cb.y + h3 + g, rw, h3, 2), col(rx, cb.y + 2 * (h3 + g), rw, h3, 3),
+      ] };
+    }
+    case 'hero-top': {
+      const bh = Math.round(cb.h * 0.56);
+      const by = cb.y + bh + g;
+      const rh = cb.h - bh - g;
+      const w3 = Math.round((cb.w - 2 * g) / 3);
+      return { bg: null, panels: [
+        col(cb.x, cb.y, cb.w, bh, 0),
+        col(cb.x, by, w3, rh, 1), col(cb.x + w3 + g, by, w3, rh, 2), col(cb.x + 2 * (w3 + g), by, w3, rh, 3),
+      ] };
+    }
+    case 'full':
+      return { bg: null, panels: [col(cb.x, cb.y, cb.w, cb.h, 0)] };
+    case 'columns': {
+      const w3 = Math.round((cb.w - 2 * g) / 3);
+      return { bg: null, panels: [
+        col(cb.x, cb.y, w3, cb.h, 0),
+        col(cb.x + w3 + g, cb.y, w3, cb.h, 1),
+        col(cb.x + 2 * (w3 + g), cb.y, w3, cb.h, 2),
+      ] };
+    }
+    case 'tilted': {
+      const w2 = Math.round((cb.w - g) / 2), h2 = Math.round((cb.h - g) / 2);
+      return { bg: null, panels: [
+        col(cb.x, cb.y, w2, h2, 0, -1.4), col(cb.x + w2 + g, cb.y, w2, h2, 1, 1.2),
+        col(cb.x, cb.y + h2 + g, w2, h2, 2, 1.4), col(cb.x + w2 + g, cb.y + h2 + g, w2, h2, 3, -1.2),
+      ] };
+    }
+    case 'mosaic': {
+      const w3 = Math.round((cb.w - 2 * g) / 3), h3 = Math.round((cb.h - 2 * g) / 3);
+      const out = [];
+      for (let r = 0; r < 3; r++)
+        for (let c = 0; c < 3; c++)
+          out.push(col(cb.x + c * (w3 + g), cb.y + r * (h3 + g), w3, h3, r * 3 + c));
+      return { bg: null, panels: out };
+    }
+    case 'popout': {
+      const hx = cb.x + Math.round(cb.w * 0.56);
+      const hw = cb.w - Math.round(cb.w * 0.56);
+      const hh = Math.round(cb.h * 0.66);
+      const sw = Math.round((Math.round(cb.w * 0.56) - g) / 2);
+      const sy = cb.y + hh + g;
+      const sh = cb.h - hh - g;
+      return { bg: 0, panels: [
+        col(hx, cb.y, hw, hh, 1),
+        col(cb.x, sy, sw, sh, 2),
+        col(cb.x + sw + g, sy, sw, sh, 3),
+      ] };
+    }
+    default:
+      return layoutRects('poster', W, H);
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Photo cropping — source window keeps the face pin visible           */
+/* ------------------------------------------------------------------ */
+
+function cropWindow(panel, img, rect) {
+  const iw = img.naturalWidth, ih = img.naturalHeight;
+  const base = Math.max(rect.w / iw, rect.h / ih) * panel.zoom;
+  const sw = rect.w / base, sh = rect.h / base;
+  const anchor = panel.face ? [panel.face[0] + panel.ox, panel.face[1] + panel.oy] : [0.5 + panel.ox, 0.5 + panel.oy];
+  let sx = clamp(anchor[0] * iw - sw / 2, 0, Math.max(0, iw - sw));
+  let sy = clamp(anchor[1] * ih - sh / 2, 0, Math.max(0, ih - sh));
+  if (sw >= iw) sx = 0;
+  if (sh >= ih) sy = 0;
+  return { sx, sy, sw: Math.min(sw, iw), sh: Math.min(sh, ih) };
+}
+
+function drawPhotoInto(ctx, panel, img, rect) {
+  const win = cropWindow(panel, img, rect);
+  ctx.save();
+  roundRectPath(ctx, rect.x, rect.y, rect.w, rect.h, Math.max(4, rect.w * 0.008));
+  ctx.clip();
+  ctx.drawImage(img, win.sx, win.sy, win.sw, win.sh, rect.x, rect.y, rect.w, rect.h);
+  ctx.restore();
+  return win;
+}
+
+/* ------------------------------------------------------------------ */
+/* Title geometry + chrome rendering                                   */
+/* ------------------------------------------------------------------ */
+
+function splitTitle(text) {
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  if (words.length < 2) return [text.trim().toUpperCase() || 'VICE'];
+  let best = 1, bestDiff = Infinity;
+  const total = words.join(' ').length;
+  for (let i = 1; i < words.length; i++) {
+    const left = words.slice(0, i).join(' ').length;
+    const diff = Math.abs(total / 2 - left);
+    if (diff < bestDiff) { bestDiff = diff; best = i; }
+  }
+  return [words.slice(0, best).join(' ').toUpperCase(), words.slice(best).join(' ').toUpperCase()];
+}
+
+function titleGeom(ctx, W, H) {
+  const lines = splitTitle(state.title);
+  const maxW = W * 0.66;
+  const cap = H * 0.22;
+  let size = cap;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  for (;;) {
+    ctx.font = `${size}px "${state.font}", sans-serif`;
+    const widest = Math.max(...lines.map(l => ctx.measureText(l).width));
+    if (widest <= maxW || size <= H * 0.07) break;
+    size *= 0.92;
+  }
+  const lineH = size * 0.94;
+  const totalH = lines.length * lineH;
+  const topY = H * 0.50 - totalH / 2;
+  return { lines, size, lineH, totalH, topY, maxW, cx: W / 2 };
+}
+
+function drawChromeTitle(ctx, W, H) {
+  const pal = PALETTES.find(p => p.id === state.palette) || PALETTES[0];
+  const g = titleGeom(ctx, W, H);
+  const s = H / 1080;
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = `${g.size}px "${state.font}", sans-serif`;
+  ctx.lineJoin = 'round';
+  // striped fill: hard colour bands stacked down the whole title block
+  const grad = ctx.createLinearGradient(0, g.topY, 0, g.topY + g.totalH);
+  grad.addColorStop(0.00, pal.stripes[0]);
+  grad.addColorStop(0.25, pal.stripes[0]);
+  grad.addColorStop(0.25, pal.stripes[1]);
+  grad.addColorStop(0.50, pal.stripes[1]);
+  grad.addColorStop(0.50, pal.stripes[2]);
+  grad.addColorStop(0.75, pal.stripes[2]);
+  grad.addColorStop(0.75, pal.stripes[3]);
+  grad.addColorStop(1.00, pal.stripes[3]);
+  // 3D extrusion, dark, stepping down-right
+  ctx.fillStyle = pal.edge;
+  for (let i = 11; i >= 1; i--) {
+    g.lines.forEach((line, li) => {
+      ctx.fillText(line, g.cx + i * 2.1 * s, g.topY + g.lineH * (li + 0.5) + i * 3.0 * s);
+    });
+  }
+  // white outline, then striped fill, then a thin crisp outline again
+  ctx.lineWidth = Math.max(4, g.size * 0.085);
+  ctx.strokeStyle = '#ffffff';
+  g.lines.forEach((line, li) => {
+    const y = g.topY + g.lineH * (li + 0.5);
+    ctx.strokeText(line, g.cx, y);
+  });
+  ctx.fillStyle = grad;
+  g.lines.forEach((line, li) => {
+    const y = g.topY + g.lineH * (li + 0.5);
+    ctx.fillText(line, g.cx, y);
+  });
+  ctx.lineWidth = Math.max(2, g.size * 0.022);
+  g.lines.forEach((line, li) => {
+    const y = g.topY + g.lineH * (li + 0.5);
+    ctx.strokeText(line, g.cx, y);
+  });
+  ctx.restore();
+  return g;
+}
+
+/* ------------------------------------------------------------------ */
+/* Poster dressing                                                     */
+/* ------------------------------------------------------------------ */
+
+let grainTile = null;
+function makeGrainTile() {
+  const t = document.createElement('canvas');
+  t.width = 256; t.height = 256;
+  const c = t.getContext('2d');
+  const img = c.createImageData(256, 256);
+  for (let i = 0; i < img.data.length; i += 4) {
+    const v = Math.floor(Math.random() * 255);
+    img.data[i] = v; img.data[i + 1] = v; img.data[i + 2] = v; img.data[i + 3] = 255;
+  }
+  c.putImageData(img, 0, 0);
+  return t;
+}
+
+function drawMasthead(ctx, W, H) {
+  const mh = Math.round(H * 0.075);
+  // Text sizes scale with the SMALLER side, so narrow covers never collide.
+  const s = Math.min(W, H) / 1080;
+  ctx.save();
+  ctx.fillStyle = '#0a0a12';
+  ctx.fillRect(0, 0, W, mh);
+  ctx.fillStyle = GOLD;
+  ctx.fillRect(0, mh - Math.max(2, 3 * s), W, Math.max(2, 3 * s));
+  // five gold stars, left
+  const starX = Math.round(W * 0.014) + 6;
+  for (let i = 0; i < 5; i++) {
+    starPath(ctx, starX + i * Math.round(26 * s) + 9 * s, mh / 2, 5, 11 * s, 4.5 * s);
+    ctx.fillStyle = GOLD;
+    ctx.fill();
+  }
+  // VOL. 1 box, right — fixed first so the texts know their limits
+  const bw = Math.round(104 * s), bh = Math.round(44 * s);
+  const bx = W - Math.round(W * 0.014) - bw, by = (mh - bh) / 2;
+  ctx.fillStyle = GOLD;
+  ctx.fillRect(bx, by, bw, bh);
+  ctx.fillStyle = '#14100a';
+  ctx.font = `${Math.round(23 * s)}px "Anton", sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('VOL. 1', bx + bw / 2, by + bh / 2 + 1);
+  // quote (left) and gazette (centre): shrink together until both fit
+  const quoteX = starX + 5 * Math.round(26 * s) + 14 * s;
+  const gap = Math.round(24 * s);
+  let qSize = 21 * s, gSize = 30 * s;
+  let quote = state.quote.toUpperCase();
+  const gazette = state.gazette.toUpperCase();
+  for (let tries = 0; tries < 30; tries++) {
+    // measure WITH the letter-spacing the draw pass will use — otherwise
+    // the fitted text still collides once the spacing is applied
+    try { ctx.letterSpacing = `${2 * s}px`; } catch (e) {}
+    ctx.font = `${Math.round(qSize)}px "Archivo Black", sans-serif`;
+    const qw = ctx.measureText(quote).width;
+    try { ctx.letterSpacing = `${3 * s}px`; } catch (e) {}
+    ctx.font = `${Math.round(gSize)}px "Anton", sans-serif`;
+    const gw = ctx.measureText(gazette).width;
+    const gzLeft = W / 2 - gw / 2;
+    const gzRight = W / 2 + gw / 2;
+    if (quoteX + qw + gap < gzLeft && gzRight + gap < bx) break;
+    if (qSize > 12 * s) { qSize *= 0.92; gSize *= 0.92; continue; }
+    // last resort: shorten the quote with an ellipsis
+    if (quote.length > 4) { quote = quote.slice(0, -2) + '…'; continue; }
+    break;
+  }
+  try { ctx.letterSpacing = '0px'; } catch (e) {}
+  ctx.fillStyle = '#ffffff';
+  ctx.font = `${Math.round(qSize)}px "Archivo Black", sans-serif`;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  try { ctx.letterSpacing = `${2 * s}px`; } catch (e) {}
+  ctx.fillText(quote, quoteX, mh / 2 + 1);
+  ctx.font = `${Math.round(gSize)}px "Anton", sans-serif`;
+  ctx.textAlign = 'center';
+  try { ctx.letterSpacing = `${3 * s}px`; } catch (e) {}
+  ctx.fillText(gazette, W / 2, mh / 2 + 1);
+  try { ctx.letterSpacing = '0px'; } catch (e) {}
+  ctx.restore();
+}
+
+function splitBilling() {
+  const parts = state.billing.split('·').map(p => p.trim()).filter(Boolean);
+  if (parts.length >= 2) return [parts[0].toUpperCase(), parts.slice(1).join(' · ').toUpperCase()];
+  const words = state.billing.trim().split(/\s+/);
+  const mid = Math.ceil(words.length / 2);
+  return [words.slice(0, mid).join(' ').toUpperCase(), words.slice(mid).join(' ').toUpperCase()];
+}
+
+function drawBottomBand(ctx, W, H, titleGeomInfo) {
+  // Font sizes scale with the SMALLER side: in portrait the band is narrow.
+  const s = Math.min(W, H) / 1080;
+  const y0 = Math.round(H * 0.885);
+  const m = Math.round(W * 0.014);
+  ctx.save();
+  if (state.show.billing) {
+    const [l1, l2] = splitBilling();
+    // shrink the billing until both lines fit the centre lane, clear of
+    // COMING SOON on the left and the barcode on the right
+    let f1 = 22 * s, f2 = 20 * s;
+    const maxW = W * 0.46;
+    for (let tries = 0; tries < 20; tries++) {
+      // measure with the letter-spacing the draw pass applies
+      try { ctx.letterSpacing = `${1.5 * s}px`; } catch (e) {}
+      ctx.font = `${Math.round(f1)}px "Archivo Black", sans-serif`;
+      const w1 = ctx.measureText(l1).width;
+      ctx.font = `${Math.round(f2)}px "Archivo Black", sans-serif`;
+      const w2 = ctx.measureText(l2).width;
+      if (Math.max(w1, w2) <= maxW) break;
+      f1 *= 0.92; f2 *= 0.92;
+    }
+    try { ctx.letterSpacing = '0px'; } catch (e) {}
+    ctx.fillStyle = '#ffffff';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    try { ctx.letterSpacing = `${1.5 * s}px`; } catch (e) {}
+    ctx.font = `${Math.round(f1)}px "Archivo Black", sans-serif`;
+    ctx.fillText(l1, W / 2, y0 + Math.round(30 * s));
+    ctx.font = `${Math.round(f2)}px "Archivo Black", sans-serif`;
+    ctx.fillText(l2, W / 2, y0 + Math.round(66 * s));
+    try { ctx.letterSpacing = '0px'; } catch (e) {}
+  }
+  if (state.show.coming) {
+    ctx.fillStyle = GOLD;
+    ctx.font = `${Math.round(40 * s)}px "Anton", sans-serif`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    try { ctx.letterSpacing = `${2 * s}px`; } catch (e) {}
+    ctx.fillText('COMING SOON', m, y0 + (H - y0) / 2 + 2);
+    try { ctx.letterSpacing = '0px'; } catch (e) {}
+    // deterministic barcode from the title
+    const rand = makeRandom(hashString(state.title || 'vice'));
+    const digits = Array.from({ length: 12 }, () => Math.floor(rand() * 10)).join('');
+    const bw = Math.round(210 * s), bh = Math.round(52 * s);
+    const bx = W - m - bw, by = y0 + Math.round(56 * s);
+    ctx.fillStyle = '#ffffff';
+    ctx.font = `${Math.round(15 * s)}px "Archivo Black", sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillText(digits.slice(0, 1) + ' ' + digits.slice(1, 7) + ' ' + digits.slice(7), bx + bw / 2, y0 + Math.round(38 * s));
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(bx - 4, by - 4, bw + 8, bh + 8);
+    ctx.fillStyle = '#111111';
+    let px = bx;
+    while (px < bx + bw - 3) {
+      const wbar = 2 + Math.floor(rand() * 4);
+      const gap = 1 + Math.floor(rand() * 3);
+      if (rand() > 0.35) ctx.fillRect(px, by, wbar, bh);
+      px += wbar + gap;
+    }
+  }
+  ctx.restore();
+}
+
+function drawSeal(ctx, W, H) {
+  const s = H / 1080;
+  // low-right of the hero: clear of every face pin in the default poster
+  const cx = W * 0.73, cy = H * 0.68;
+  const R = W * 0.052;
+  ctx.save();
+  const grad = ctx.createRadialGradient(cx - R * 0.3, cy - R * 0.3, R * 0.1, cx, cy, R);
+  grad.addColorStop(0, '#ffe98a');
+  grad.addColorStop(1, '#e8a91c');
+  starPath(ctx, cx, cy, 14, R, R * 0.80);
+  ctx.fillStyle = grad;
+  ctx.fill();
+  ctx.lineWidth = Math.max(2, 3 * s);
+  ctx.strokeStyle = '#8a6d1f';
+  ctx.stroke();
+  ctx.fillStyle = '#241a04';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = `${Math.round(R * 0.30)}px "Archivo Black", sans-serif`;
+  ctx.fillText('BEST', cx, cy - R * 0.17);
+  ctx.fillText('CAST', cx, cy + R * 0.17);
+  ctx.restore();
+}
+
+function drawSunsetLines(ctx, W, H, titleG) {
+  const s = H / 1080;
+  const cy = titleG.topY + titleG.totalH + Math.round(22 * s);
+  const widths = [0.30, 0.22, 0.15];
+  const colors = ['#ff7a18', '#ff2e88', '#ffc46b'];
+  const heights = [6, 5, 4];
+  ctx.save();
+  widths.forEach((f, i) => {
+    const w = W * f, x = W / 2 - w / 2;
+    ctx.fillStyle = colors[i];
+    ctx.fillRect(x, cy + i * Math.round(11 * s), w, Math.round(heights[i] * s));
+  });
+  ctx.restore();
+  return cy + 3 * Math.round(11 * s);
+}
+
+// Ribbon rectangle, computed from the title block so chips can dodge it too.
+function ribbonGeom(ctx, W, H, titleG) {
+  const sH = H / 1080, s2 = Math.min(W, H) / 1080;
+  const linesEnd = titleG.topY + titleG.totalH + Math.round(22 * sH) + 3 * Math.round(11 * sH);
+  const by = linesEnd + Math.round(12 * s2);
+  ctx.save();
+  ctx.font = `${Math.round(28 * s2)}px "Archivo Black", sans-serif`;
+  try { ctx.letterSpacing = `${3 * s2}px`; } catch (e) {}
+  const tw = ctx.measureText(state.tagline.toUpperCase()).width;
+  ctx.restore();
+  const pad = Math.round(46 * s2);
+  const bw = tw + pad * 2, bh = Math.round(46 * s2);
+  return { x: W / 2 - bw / 2, y: by, w: bw, h: bh };
+}
+
+function drawRibbon(ctx, W, H, titleG) {
+  const s2 = Math.min(W, H) / 1080;
+  const r = ribbonGeom(ctx, W, H, titleG);
+  const notch = Math.round(14 * s2);
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(r.x + notch, r.y);
+  ctx.lineTo(r.x + r.w - notch, r.y);
+  ctx.lineTo(r.x + r.w, r.y + r.h / 2);
+  ctx.lineTo(r.x + r.w - notch, r.y + r.h);
+  ctx.lineTo(r.x + notch, r.y + r.h);
+  ctx.lineTo(r.x, r.y + r.h / 2);
+  ctx.closePath();
+  ctx.fillStyle = '#ff2e88';
+  ctx.fill();
+  ctx.fillStyle = '#ffffff';
+  ctx.font = `${Math.round(28 * s2)}px "Archivo Black", sans-serif`;
+  try { ctx.letterSpacing = `${3 * s2}px`; } catch (e) {}
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(state.tagline.toUpperCase(), W / 2, r.y + r.h / 2 + 1);
+  try { ctx.letterSpacing = '0px'; } catch (e) {}
+  ctx.restore();
+}
+
+/* ------------------------------------------------------------------ */
+/* The one renderer — preview and export share it                      */
+/* ------------------------------------------------------------------ */
+
+function renderCover(ctx, W, H, opts) {
+  const forExport = !!(opts && opts.forExport);
+  const grade = GRADES.find(gr => gr.id === state.grade) || GRADES[0];
+  ctx.save();
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#0a0a12';
+  ctx.fillRect(0, 0, W, H);
+
+  const geo = layoutRects(state.layout, W, H);
+  const wins = new Map(); // slot -> crop window, for face-pin math
+
+  // pop-out background photo, full bleed behind everything
+  if (geo.bg !== null && geo.bg !== undefined) {
+    const bgPanel = state.panels[geo.bg];
+    const bgPhoto = photos.get(bgPanel.photo);
+    if (bgPhoto && bgPhoto.img) {
+      if (grade.id === 'mono') ctx.filter = 'grayscale(1) contrast(1.06)';
+      drawPhotoInto(ctx, bgPanel, bgPhoto.img, { x: 0, y: 0, w: W, h: H });
+      ctx.filter = 'none';
+    }
+  }
+
+  // panels
+  geo.panels.forEach(p => {
+    const panel = state.panels[p.slot];
+    const photo = photos.get(panel.photo);
+    if (!photo || !photo.img) return;
+    ctx.save();
+    if (p.rot) {
+      ctx.translate(p.x + p.w / 2, p.y + p.h / 2);
+      ctx.rotate((p.rot * Math.PI) / 180);
+      ctx.translate(-(p.x + p.w / 2), -(p.y + p.h / 2));
+    }
+    if (state.layout === 'popout' && p.slot === 1) {
+      ctx.shadowColor = 'rgba(0,0,0,0.55)';
+      ctx.shadowBlur = W * 0.02;
+      ctx.shadowOffsetY = H * 0.012;
+    }
+    if (grade.id === 'mono') ctx.filter = 'grayscale(1) contrast(1.06)';
+    const win = drawPhotoInto(ctx, panel, photo.img, p);
+    ctx.filter = 'none';
+    ctx.restore();
+    wins.set(p.slot, { rect: p, win, img: photo.img });
+  });
+
+  // sunset grade wash over the whole cover
+  const wash = ctx.createLinearGradient(0, 0, 0, H);
+  wash.addColorStop(0, grade.top);
+  wash.addColorStop(1, grade.bottom);
+  ctx.save();
+  ctx.globalAlpha = 0.22;
+  ctx.fillStyle = wash;
+  ctx.fillRect(0, 0, W, H);
+  ctx.globalAlpha = 0.45;
+  ctx.globalCompositeOperation = 'soft-light';
+  ctx.fillStyle = grade.tint;
+  ctx.fillRect(0, 0, W, H);
+  ctx.restore();
+
+  // title geometry first: chips must dodge it (and the ribbon below it)
+  const titleG = titleGeom(ctx, W, H);
+  const titleRect = {
+    x: titleG.cx - titleG.maxW / 2, y: titleG.topY - 6,
+    w: titleG.maxW, h: titleG.totalH + 12,
+  };
+  const ribbonRect = ribbonGeom(ctx, W, H, titleG);
+
+  // cast chips, top-left of each panel, skipped when the title or ribbon covers them
+  if (state.layout !== 'full') {
+    geo.panels.forEach(p => {
+      const panel = state.panels[p.slot];
+      const chipH = Math.round(Math.min(W, H) * 0.042);
+      const chip = { x: p.x + Math.round(W * 0.008), y: p.y + Math.round(H * 0.010), w: 0, h: chipH };
+      ctx.save();
+      ctx.font = `${Math.round(Math.min(W, H) * 0.024)}px "Archivo Black", sans-serif`;
+      const tw = ctx.measureText(panel.tag).width;
+      chip.w = tw + Math.round(W * 0.016);
+      const hit = r => chip.x < r.x + r.w && chip.x + chip.w > r.x &&
+        chip.y < r.y + r.h && chip.y + chip.h > r.y;
+      const overlap = hit(titleRect) || hit(ribbonRect);
+      if (!overlap) {
+        ctx.fillStyle = 'rgba(0,0,0,0.62)';
+        roundRectPath(ctx, chip.x, chip.y, chip.w, chip.h, chip.h * 0.28);
+        ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(panel.tag, chip.x + Math.round(W * 0.008), chip.y + chip.h / 2 + 1);
+      }
+      ctx.restore();
+    });
+  }
+
+  // poster dressing
+  const drawnTitle = drawChromeTitle(ctx, W, H);
+  drawSunsetLines(ctx, W, H, drawnTitle);
+  drawRibbon(ctx, W, H, drawnTitle);
+  if (state.show.seal) drawSeal(ctx, W, H);
+  if (state.show.masthead) drawMasthead(ctx, W, H);
+  drawBottomBand(ctx, W, H, drawnTitle);
+
+  // gold frame
+  if (state.show.frame) {
+    ctx.save();
+    ctx.strokeStyle = GOLD;
+    ctx.lineWidth = Math.max(3, H * 0.005);
+    ctx.strokeRect(Math.round(W * 0.003), Math.round(H * 0.005), W - Math.round(W * 0.006), H - Math.round(H * 0.010));
+    ctx.globalAlpha = 0.55;
+    ctx.lineWidth = Math.max(1.5, H * 0.0018);
+    ctx.strokeRect(Math.round(W * 0.009), Math.round(H * 0.016), W - Math.round(W * 0.018), H - Math.round(H * 0.032));
+    ctx.restore();
+  }
+
+  // film grain + vignette
+  if (state.show.grain) {
+    if (!grainTile) grainTile = makeGrainTile();
+    const pat = ctx.createPattern(grainTile, 'repeat');
+    ctx.save();
+    ctx.globalAlpha = 0.09;
+    ctx.globalCompositeOperation = 'overlay';
+    ctx.fillStyle = pat;
+    ctx.fillRect(0, 0, W, H);
+    ctx.restore();
+  }
+  if (state.show.vignette) {
+    const vg = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.42, W / 2, H / 2, Math.max(W, H) * 0.72);
+    vg.addColorStop(0, 'rgba(0,0,0,0)');
+    vg.addColorStop(1, 'rgba(0,0,0,0.34)');
+    ctx.save();
+    ctx.fillStyle = vg;
+    ctx.fillRect(0, 0, W, H);
+    ctx.restore();
+  }
+
+  // editor-only markers: selection outline + face pins
+  if (!forExport) {
+    geo.panels.forEach(p => {
+      const panel = state.panels[p.slot];
+      if (panel.face) {
+        const win = wins.get(p.slot);
+        if (win) {
+          const fx = p.x + ((panel.face[0] * win.img.naturalWidth - win.win.sx) / win.win.sw) * p.w;
+          const fy = p.y + ((panel.face[1] * win.img.naturalHeight - win.win.sy) / win.win.sh) * p.h;
+          if (fx >= p.x && fx <= p.x + p.w && fy >= p.y && fy <= p.y + p.h) {
+            const r = Math.max(7, W * 0.009);
+            ctx.save();
+            ctx.strokeStyle = '#2ee6c8';
+            ctx.lineWidth = 3;
+            ctx.beginPath(); ctx.arc(fx, fy, r, 0, Math.PI * 2); ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(fx - r - 6, fy); ctx.lineTo(fx - r + 2, fy);
+            ctx.moveTo(fx + r - 2, fy); ctx.lineTo(fx + r + 6, fy);
+            ctx.moveTo(fx, fy - r - 6); ctx.lineTo(fx, fy - r + 2);
+            ctx.moveTo(fx, fy + r - 2); ctx.lineTo(fx, fy + r + 6);
+            ctx.stroke();
+            ctx.restore();
+          }
+        }
+      }
+    });
+    const sel = geo.panels.find(p => p.slot === state.selected);
+    if (sel) {
+      ctx.save();
+      ctx.strokeStyle = GOLD;
+      ctx.lineWidth = Math.max(3, W * 0.003);
+      roundRectPath(ctx, sel.x - 3, sel.y - 3, sel.w + 6, sel.h + 6, 10);
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  ctx.restore();
+  return { geo, wins };
+}
+
+let lastRender = null;
+let exportClean = false; // shot-cover mode renders without editor markers
+function render() {
+  const canvas = $('stage');
+  const ctx = canvas.getContext('2d');
+  lastRender = renderCover(ctx, canvas.width, canvas.height, { forExport: exportClean });
+  $('panelLabel').textContent = 'Panel ' + (state.selected + 1) + ' · ' + state.panels[state.selected].tag;
+}
+
+/* ------------------------------------------------------------------ */
+/* Export                                                             */
+/* ------------------------------------------------------------------ */
+
+function renderOffscreen(w, h) {
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  renderCover(c.getContext('2d'), w, h, { forExport: true });
+  return c;
+}
+
+function exportPNG(sizeKey) {
+  const [w, h] = SIZES[sizeKey] || SIZES['1920x1080'];
+  return new Promise(resolve => {
+    const c = renderOffscreen(w, h);
+    c.toBlob(blob => {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'vice-cover-' + sizeKey + '.png';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+      resolve({ w, h, bytes: blob.size });
+    }, 'image/png');
+  });
+}
+
+// Test hook: renders an export and hands the PNG back as a data URL.
+window.__viceExport = function (sizeKey) {
+  return new Promise(resolve => {
+    const [w, h] = SIZES[sizeKey] || SIZES['1920x1080'];
+    const c = renderOffscreen(w, h);
+    resolve({ dataUrl: c.toDataURL('image/png'), w, h });
+  });
+};
+window.__viceReady = false;
+
+/* ------------------------------------------------------------------ */
+/* Photo loading                                                      */
+/* ------------------------------------------------------------------ */
 
 function loadImage(src) {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => resolve(img);
-    img.onerror = reject;
+    img.onerror = () => reject(new Error('cannot load ' + src));
     img.src = src;
   });
 }
 
-/* ---------------- grades & chrome ---------------- */
-const GRADES = {
-  "Neon Sunset": { top: "#ff7a18", bottom: "#ff2e88", tint: "#ff9a3d", wash: 0.30 },
-  "Vice Pink": { top: "#ff2e88", bottom: "#b967ff", tint: "#ff5ea8", wash: 0.30 },
-  "Teal Night": { top: "#0ea5a5", bottom: "#123a6d", tint: "#2dd4bf", wash: 0.30 },
-  "Gold Hour": { top: "#ffd23f", bottom: "#ff7a18", tint: "#f5c542", wash: 0.28 },
-  "Heatwave": { top: "#ff3d00", bottom: "#7a0e2e", tint: "#ff6a00", wash: 0.32 },
-  "Mono Noir": { top: "#8a8a99", bottom: "#111118", tint: "#9a9aad", wash: 0.34 },
-  "Palm Teal": { top: "#2dd4bf", bottom: "#0e7490", tint: "#34d399", wash: 0.28 },
-  "Dusk Violet": { top: "#a855f7", bottom: "#1e1b4b", tint: "#8b5cf6", wash: 0.30 },
-};
-const CHROMES = {
-  sunset: ["#ffe259", "#ffb347", "#ff7a18", "#ff2e88", "#b967ff", "#7c3aed"],
-  gold: ["#fff7cc", "#ffe98a", "#ffd23f", "#f5a623", "#d99a06", "#fff3b0"],
-  pink: ["#ffd6ec", "#ff9ecf", "#ff5ea8", "#ff2e88", "#d81b60", "#ff7ad9"],
-  ice: ["#eafcff", "#b8ecff", "#7dd3fc", "#38bdf8", "#2563eb", "#d8f6ff"],
-  white: ["#ffffff", "#f2f2f8", "#e2e2ea", "#ffffff", "#d9d9e3", "#ffffff"],
-};
-
-/* ---------------- layouts (1920x1080 base space) ---------------- */
-// Each layout: rects for its panels, a title anchor, and a seal anchor.
-// Panels share one chrome: photo band y 90..860, billing band y 874..996, footer y 1008..1064.
-const LAYOUTS = {
-  "Poster hero": {
-    rects: [
-      { x: 648, y: 90, w: 624, h: 770, hero: true },
-      { x: 28, y: 90, w: 592, h: 370 }, { x: 28, y: 474, w: 592, h: 386 },
-      { x: 1300, y: 90, w: 592, h: 370 }, { x: 1300, y: 474, w: 592, h: 386 },
-      { x: 28, y: 874, w: 592, h: 122 }, { x: 1300, y: 874, w: 592, h: 122 },
-    ],
-    title: { cx: 960, cy: 590, maxW: 900, lines: 2, capPx: 240 },
-    seal: { x: 1330, y: 800, r: 88 },
-  },
-  "Grid 2x2": {
-    rects: [
-      { x: 28, y: 90, w: 916, h: 378 }, { x: 976, y: 90, w: 916, h: 378 },
-      { x: 28, y: 482, w: 916, h: 378 }, { x: 976, y: 482, w: 916, h: 378 },
-    ],
-    title: { cx: 960, cy: 540, maxW: 1150, lines: 2, capPx: 240 },
-    seal: { x: 1700, y: 800, r: 80 },
-  },
-  "Hero left": {
-    rects: [
-      { x: 28, y: 90, w: 880, h: 770, hero: true },
-      { x: 922, y: 90, w: 970, h: 247 }, { x: 922, y: 351, w: 970, h: 247 }, { x: 922, y: 612, w: 970, h: 248 },
-    ],
-    title: { cx: 468, cy: 570, maxW: 820, lines: 2, capPx: 220 },
-    seal: { x: 1700, y: 800, r: 80 },
-  },
-  "Hero top": {
-    rects: [
-      { x: 28, y: 90, w: 1864, h: 470, hero: true },
-      { x: 28, y: 574, w: 608, h: 286 }, { x: 656, y: 574, w: 608, h: 286 }, { x: 1284, y: 574, w: 608, h: 286 },
-    ],
-    title: { cx: 960, cy: 430, maxW: 1500, lines: 1, capPx: 200 },
-    seal: { x: 1700, y: 800, r: 80 },
-  },
-  "Full bleed": {
-    rects: [{ x: 0, y: 0, w: 1920, h: 1080 }],
-    title: { cx: 960, cy: 540, maxW: 1300, lines: 2, capPx: 240 },
-    seal: { x: 1700, y: 820, r: 80 },
-  },
-  "Three columns": {
-    rects: [
-      { x: 28, y: 90, w: 608, h: 770 }, { x: 656, y: 90, w: 608, h: 770 }, { x: 1284, y: 90, w: 608, h: 770 },
-    ],
-    title: { cx: 960, cy: 590, maxW: 1100, lines: 2, capPx: 240 },
-    seal: { x: 1700, y: 800, r: 80 },
-  },
-  "Tilted": {
-    rects: [
-      { x: 28, y: 90, w: 916, h: 378, rot: -1.4 }, { x: 976, y: 90, w: 916, h: 378, rot: 1.6 },
-      { x: 28, y: 482, w: 916, h: 378, rot: 1.2 }, { x: 976, y: 482, w: 916, h: 378, rot: -1.5 },
-    ],
-    title: { cx: 960, cy: 540, maxW: 1150, lines: 2, capPx: 240 },
-    seal: { x: 1700, y: 800, r: 80 },
-  },
-  "Mosaic 9": {
-    rects: [
-      { x: 28, y: 90, w: 608, h: 247 }, { x: 656, y: 90, w: 608, h: 247 }, { x: 1284, y: 90, w: 608, h: 247 },
-      { x: 28, y: 351, w: 608, h: 247 }, { x: 656, y: 351, w: 608, h: 247 }, { x: 1284, y: 351, w: 608, h: 247 },
-      { x: 28, y: 612, w: 608, h: 248 }, { x: 656, y: 612, w: 608, h: 248 }, { x: 1284, y: 612, w: 608, h: 248 },
-    ],
-    title: { cx: 960, cy: 540, maxW: 1100, lines: 2, capPx: 240 },
-    seal: { x: 1700, y: 800, r: 80 },
-  },
-  "Pop-out hero": {
-    rects: [
-      { x: 0, y: 0, w: 1920, h: 1080, bg: true },
-      { x: 1150, y: 90, w: 742, h: 900, hero: true },
-      { x: 28, y: 90, w: 592, h: 440 }, { x: 28, y: 544, w: 592, h: 446 },
-    ],
-    title: { cx: 880, cy: 540, maxW: 720, lines: 2, capPx: 210 },
-    seal: { x: 880, y: 790, r: 84 },
-  },
-};
-const LAYOUT_NAMES = Object.keys(LAYOUTS);
-const ASPECTS = { landscape: [1920, 1080], square: [1080, 1080], portrait: [1080, 1350] };
-
-/* ---------------- state ---------------- */
-function defaultPanels() {
-  const assign = ["s-convertible", "s-rooftop", "s-neon", "s-diner", "s-pier", "s-popout", "s-neon", "s-diner", "s-pier"];
-  return Array.from({ length: 9 }, (_, i) => ({
-    src: assign[i % assign.length],
-    zoom: 1,
-    ox: 0,
-    oy: 0,
-    face: SAMPLES.find((s) => s.id === assign[i % assign.length]).face,
-    tag: CAST_TAGS[i % CAST_TAGS.length],
-  }));
-}
-
-const state = {
-  layout: "Poster hero",
-  grade: "Neon Sunset",
-  chrome: "sunset",
-  font: "Anton",
-  title: "SUNSET HEIST",
-  tagline: "ONE LAST SCORE · ONE LONG SUNSET",
-  billing: "A VICE COVER PICTURES PRODUCTION · STARRING YOU AND YOUR CREW",
-  quote: "THE WILDEST RIDE OF THE SUMMER",
-  gazette: "THE SUNSET GAZETTE",
-  sealText: "BEST CAST",
-  toggles: { frame: true, masthead: true, ribbon: true, coming: true, seal: true, billing: true, grain: true, vignette: true },
-  aspect: "landscape",
-  panels: defaultPanels(),
-  selected: 0,
-};
-
-let pendingPhoto = null;   // photo id waiting to be placed on a panel
-let faceMarking = false;   // next canvas click drops a face pin
-let drag = null;           // active pointer drag {panel, lastX, lastY}
-let noiseTile = null;
-
-const undoStack = [];
-const redoStack = [];
-function snapshot() {
-  return JSON.stringify({ ...state, panels: state.panels });
-}
-function pushHistory() {
-  undoStack.push(snapshot());
-  if (undoStack.length > 60) undoStack.shift();
-  redoStack.length = 0;
-}
-function restore(json) {
-  const data = JSON.parse(json);
-  Object.assign(state, data);
-  syncControls();
+async function initPhotos() {
+  for (const def of SAMPLES) {
+    try {
+      const img = await loadImage(def.file);
+      photos.set(def.key, { key: def.key, label: def.label, img, src: def.file });
+    } catch (e) { /* sample missing: keep the slot, it renders empty */ }
+  }
+  buildSampleStrip();
+  buildPhotoSelect();
   render();
 }
-function undo() {
-  if (!undoStack.length) return;
-  redoStack.push(snapshot());
-  restore(undoStack.pop());
-}
-function redo() {
-  if (!redoStack.length) return;
-  undoStack.push(snapshot());
-  restore(redoStack.pop());
-}
 
-/* ---------------- geometry helpers ---------------- */
-function scaleRect(r, W, H) {
-  const sx = W / 1920, sy = H / 1080;
-  return { x: r.x * sx, y: r.y * sy, w: r.w * sx, h: r.h * sy, rot: r.rot || 0, hero: !!r.hero, bg: !!r.bg };
-}
-function rr(c, x, y, w, h, r) {
-  const rad = Math.min(r, w / 2, h / 2);
-  c.beginPath();
-  c.moveTo(x + rad, y);
-  c.arcTo(x + w, y, x + w, y + h, rad);
-  c.arcTo(x + w, y + h, x, y + h, rad);
-  c.arcTo(x, y + h, x, y, rad);
-  c.arcTo(x, y, x + w, y, rad);
-  c.closePath();
-}
-function cropFor(panel, img, pw, ph) {
-  const zoom = panel.zoom || 1;
-  const scale = Math.max(pw / img.naturalWidth, ph / img.naturalHeight) * zoom;
-  const sw = pw / scale, sh = ph / scale;
-  let sx, sy;
-  if (panel.face) {
-    // Keep the pinned face near the upper-middle of the panel so the title never covers it.
-    // Very short panels centre the face instead, or the head gets sliced by the panel edge.
-    const anchorY = ph < 160 ? 0.5 : ph >= 600 ? 0.22 : 0.3;
-    sx = panel.face.x * img.naturalWidth - (pw * 0.5) / scale;
-    sy = panel.face.y * img.naturalHeight - (ph * anchorY) / scale;
-  } else {
-    sx = (img.naturalWidth - sw) / 2;
-    sy = (img.naturalHeight - sh) / 2;
-  }
-  sx += panel.ox || 0;
-  sy += panel.oy || 0;
-  sx = Math.max(0, Math.min(img.naturalWidth - sw, sx));
-  sy = Math.max(0, Math.min(img.naturalHeight - sh, sy));
-  return { sx, sy, sw, sh, scale };
-}
+/* ------------------------------------------------------------------ */
+/* UI construction                                                    */
+/* ------------------------------------------------------------------ */
 
-/* ---------------- render ---------------- */
-function drawPanel(c, rect, panel, grade, W, H, forExport, titleBox) {
-  const photo = PHOTOS.get(panel.src);
-  if (!photo) return;
-  const img = photo.img;
-  c.save();
-  if (rect.rot) {
-    c.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
-    c.rotate((rect.rot * Math.PI) / 180);
-    c.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
-  }
-  rr(c, rect.x, rect.y, rect.w, rect.h, Math.min(10, rect.w * 0.02));
-  c.clip();
-  const { sx, sy, sw, sh } = cropFor(panel, img, rect.w, rect.h);
-  c.drawImage(img, sx, sy, sw, sh, rect.x, rect.y, rect.w, rect.h);
-  // Sunset wash: warm gradient top to bottom, then a soft tint.
-  const wash = c.createLinearGradient(rect.x, rect.y, rect.x, rect.y + rect.h);
-  wash.addColorStop(0, grade.top);
-  wash.addColorStop(1, grade.bottom);
-  c.globalAlpha = grade.wash;
-  c.globalCompositeOperation = "overlay";
-  c.fillStyle = wash;
-  c.fillRect(rect.x, rect.y, rect.w, rect.h);
-  c.globalCompositeOperation = "soft-light";
-  c.globalAlpha = 0.35;
-  c.fillStyle = grade.tint;
-  c.fillRect(rect.x, rect.y, rect.w, rect.h);
-  c.globalCompositeOperation = "source-over";
-  c.globalAlpha = 1;
-  // Cast tag chip, top-left of tall-enough panels — never half-hidden under the title.
-  if (rect.h >= 160 && panel.tag) {
-    const fs = Math.max(20, Math.min(30, rect.h * 0.045 + 12));
-    c.font = `${fs}px "Bebas Neue", sans-serif`;
-    try { c.letterSpacing = "2px"; } catch (e) { /* older canvas */ }
-    const tw = c.measureText(panel.tag).width;
-    const pw = tw + 26, ph = fs + 14;
-    const px = rect.x + 12, py = rect.y + 12;
-    const hitsTitle = titleBox && px < titleBox.right + 8 && px + pw > titleBox.left - 8
-      && py < titleBox.bottom + 8 && py + ph > titleBox.top - 8;
-    if (!hitsTitle) {
-      rr(c, px, py, pw, ph, 7);
-      c.fillStyle = "rgba(8,8,14,0.78)";
-      c.fill();
-      c.fillStyle = "#ffffff";
-      c.textBaseline = "middle";
-      c.fillText(panel.tag, px + 13, py + ph / 2 + 1);
-    }
-    try { c.letterSpacing = "0px"; } catch (e) { /* older canvas */ }
-  }
-  c.restore();
-  // Thin dark edge so panels read as separate plates.
-  c.save();
-  rr(c, rect.x, rect.y, rect.w, rect.h, Math.min(10, rect.w * 0.02));
-  c.strokeStyle = "rgba(0,0,0,0.55)";
-  c.lineWidth = 2;
-  c.stroke();
-  c.restore();
-}
-
-function splitTitle(title, lines) {
-  const words = title.trim().split(/\s+/).filter(Boolean);
-  if (lines === 1 || words.length < 2) return [title.trim().toUpperCase()];
-  const half = Math.ceil(words.length / 2);
-  return [words.slice(0, half).join(" "), words.slice(half).join(" ")].map((s) => s.toUpperCase());
-}
-
-function titleMetrics(spec, W, H) {
-  const fam = `"${state.font}", sans-serif`;
-  const lines = splitTitle(state.title || "SUNSET HEIST", spec.lines);
-  let px = spec.lines === 1 ? 260 : 300;
-  const maxW = spec.maxW * (W / 1920);
-  const fit = () => {
-    ctx.font = `${px}px ${fam}`;
-    return lines.every((l) => ctx.measureText(l).width <= maxW);
-  };
-  while (px > 60 && !fit()) px -= 6;
-  if (spec.capPx) px = Math.min(px, spec.capPx);
-  ctx.font = `${px}px ${fam}`;
-  const textW = Math.max(...lines.map((l) => ctx.measureText(l).width));
-  const lineH = px * 1.04;
-  const blockH = lines.length * lineH;
-  const top = spec.cy * (H / 1080) - blockH / 2;
-  const cx = spec.cx * (W / 1920);
-  return { lines, px, lineH, blockH, top, bottom: top + blockH, cx, maxW, textW, fam,
-    left: cx - textW / 2, right: cx + textW / 2 };
-}
-
-function drawChromeTitle(c, m, W, H) {
-  const { lines, px, lineH, top, cx, fam } = m;
-  const blockH = m.blockH;
-  // Soft dark glow so the letters read over busy photos.
-  const glow = c.createRadialGradient(cx, m.top + blockH / 2, 10, cx, m.top + blockH / 2, m.maxW * 0.62);
-  glow.addColorStop(0, "rgba(5,2,10,0.42)");
-  glow.addColorStop(1, "rgba(5,2,10,0)");
-  c.fillStyle = glow;
-  c.fillRect(cx - m.maxW * 0.62, top - 30, m.maxW * 1.24, blockH + 60);
-  // Striped chrome fill: hard-stop bands across the whole title block.
-  const bands = CHROMES[state.chrome] || CHROMES.sunset;
-  const grad = c.createLinearGradient(0, top, 0, top + blockH);
-  const n = bands.length;
-  bands.forEach((col, i) => {
-    grad.addColorStop(i / n, col);
-    grad.addColorStop((i + 1) / n, col);
+function buildLayoutChips() {
+  const row = $('layoutRow');
+  row.innerHTML = '';
+  LAYOUTS.forEach((L, i) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = (i + 1) + ' · ' + L.name;
+    b.classList.toggle('on', state.layout === L.id);
+    b.addEventListener('click', () => { pushHistory(); state.layout = L.id; buildLayoutChips(); render(); });
+    row.appendChild(b);
   });
-  c.textAlign = "center";
-  c.textBaseline = "alphabetic";
-  c.lineJoin = "round";
-  lines.forEach((line, i) => {
-    const baseY = top + (i + 1) * lineH - px * 0.2;
-    // 3D extrusion: dark copies stepping down-right.
-    c.font = `${px}px ${fam}`;
-    c.fillStyle = "#240a2e";
-    for (let k = 12; k >= 1; k--) c.fillText(line, cx + k * 2.1, baseY + k * 3.1);
-    // Thick white outline, then the striped fill.
-    c.lineWidth = Math.max(6, px * 0.075);
-    c.strokeStyle = "#ffffff";
-    c.strokeText(line, cx, baseY);
-    c.fillStyle = grad;
-    c.fillText(line, cx, baseY);
+}
+
+function buildGradeChips() {
+  const row = $('gradeRow');
+  row.innerHTML = '';
+  GRADES.forEach(gr => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = gr.name;
+    b.classList.toggle('on', state.grade === gr.id);
+    b.addEventListener('click', () => { pushHistory(); state.grade = gr.id; buildGradeChips(); render(); });
+    row.appendChild(b);
   });
-  return m;
 }
 
-function drawRibbon(c, titleBox, topY, W, H) {
-  const tag = (state.tagline || "").toUpperCase();
-  if (!tag) return topY;
-  const s = W / 1920;
-  const fs = 34 * s;
-  c.font = `${fs}px "Bebas Neue", sans-serif`;
-  try { c.letterSpacing = "3px"; } catch (e) { /* older canvas */ }
-  const tw = c.measureText(tag).width;
-  const bw = Math.min(tw + 90 * s, W * 0.72);
-  const bh = 52 * s;
-  const bx = titleBox.cx - bw / 2;
-  const by = topY;
-  // Folded ribbon ends.
-  c.fillStyle = "#7a0e3d";
-  c.beginPath();
-  c.moveTo(bx + 14 * s, by + 8 * s); c.lineTo(bx - 16 * s, by + bh / 2); c.lineTo(bx + 14 * s, by + bh - 8 * s); c.closePath(); c.fill();
-  c.beginPath();
-  c.moveTo(bx + bw - 14 * s, by + 8 * s); c.lineTo(bx + bw + 16 * s, by + bh / 2); c.lineTo(bx + bw - 14 * s, by + bh - 8 * s); c.closePath(); c.fill();
-  rr(c, bx, by, bw, bh, 6 * s);
-  c.fillStyle = "#d81b60";
-  c.fill();
-  c.fillStyle = "#ffffff";
-  c.textAlign = "center";
-  c.textBaseline = "middle";
-  c.fillText(tag, titleBox.cx, by + bh / 2 + 1);
-  try { c.letterSpacing = "0px"; } catch (e) { /* older canvas */ }
-  return by + bh;
-}
-
-function drawSunsetLines(c, titleBottom, cx, W, H) {
-  const s = W / 1920;
-  const widths = [340, 260, 190];
-  const colors = ["#ff7a18", "#ff2e88", "#ffd23f"];
-  widths.forEach((w, i) => {
-    c.fillStyle = colors[i];
-    c.fillRect(cx - (w * s) / 2, titleBottom + (12 + i * 15) * s, w * s, 7 * s);
+function buildPaletteSwatches() {
+  const row = $('paletteRow');
+  row.innerHTML = '';
+  PALETTES.forEach(p => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.title = p.name;
+    b.setAttribute('aria-label', p.name + ' chrome');
+    b.style.background = 'linear-gradient(180deg,' + p.stripes.join(',') + ')';
+    b.classList.toggle('on', state.palette === p.id);
+    b.addEventListener('click', () => { pushHistory(); state.palette = p.id; buildPaletteSwatches(); render(); });
+    row.appendChild(b);
   });
-  return titleBottom + (12 + 2 * 15 + 7) * s;
 }
 
-function drawSeal(c, spec, W, H) {
-  const s = W / 1920;
-  const x = spec.x * s, y = spec.y * (H / 1080), r = spec.r * s;
-  const points = 16;
-  c.save();
-  c.beginPath();
-  for (let i = 0; i < points * 2; i++) {
-    const rad = i % 2 === 0 ? r : r * 0.82;
-    const a = (i * Math.PI) / points - Math.PI / 2;
-    const px = x + Math.cos(a) * rad, py = y + Math.sin(a) * rad;
-    if (i === 0) c.moveTo(px, py); else c.lineTo(px, py);
-  }
-  c.closePath();
-  c.fillStyle = "#f5c542";
-  c.fill();
-  c.lineWidth = 3 * s;
-  c.strokeStyle = "#7a5b00";
-  c.stroke();
-  c.beginPath();
-  c.arc(x, y, r * 0.68, 0, Math.PI * 2);
-  c.lineWidth = 2 * s;
-  c.strokeStyle = "rgba(122,91,0,0.7)";
-  c.stroke();
-  const words = (state.sealText || "BEST CAST").toUpperCase().split(/\s+/);
-  c.fillStyle = "#241a00";
-  c.textAlign = "center";
-  c.textBaseline = "middle";
-  const fs = r * 0.34;
-  c.font = `${fs}px "Anton", sans-serif`;
-  if (words.length === 1) {
-    c.fillText(words[0], x, y);
-  } else {
-    c.fillText(words[0], x, y - fs * 0.55);
-    c.fillText(words.slice(1).join(" "), x, y + fs * 0.55);
-  }
-  c.restore();
-}
-
-function drawBarcode(c, W, H) {
-  const s = W / 1920;
-  const bw = 190 * s, bh = 44 * s;
-  const x = W - 28 * s - bw, y = H - 76 * s;
-  c.fillStyle = "#ffffff";
-  c.fillRect(x, y, bw, bh + 18 * s);
-  // Deterministic bars from the title text, so the same title always prints the same code.
-  let seed = 7;
-  for (const ch of state.title) seed = (seed * 31 + ch.charCodeAt(0)) >>> 0;
-  let bx = x + 6 * s;
-  let n = seed;
-  while (bx < x + bw - 6 * s) {
-    n = (n * 1103515245 + 12345) >>> 0;
-    const wBar = (1 + (n % 3)) * 2 * s;
-    if (n % 5 !== 0) { c.fillStyle = "#111111"; c.fillRect(bx, y + 4 * s, wBar, bh - 8 * s); }
-    bx += wBar + (1 + (n % 2)) * 2 * s;
-  }
-  c.fillStyle = "#111111";
-  c.font = `${13 * s}px monospace`;
-  c.textAlign = "center";
-  c.textBaseline = "middle";
-  c.fillText("8 901234 567890", x + bw / 2, y + bh + 9 * s);
-}
-
-function splitBalanced(text) {
-  const words = text.split(/\s+/).filter(Boolean);
-  if (words.length < 2) return [text];
-  let best = 1, bestDiff = Infinity;
-  for (let i = 1; i < words.length; i++) {
-    const a = words.slice(0, i).join(" ").length;
-    const b = words.slice(i).join(" ").length;
-    const d = Math.abs(a - b);
-    if (d < bestDiff) { bestDiff = d; best = i; }
-  }
-  return [words.slice(0, best).join(" "), words.slice(best).join(" ")];
-}
-
-function drawMasthead(c, W, H) {
-  const s = W / 1920;
-  c.fillStyle = "rgba(8,6,14,0.85)";
-  c.fillRect(0, 0, W, 76 * s);
-  c.fillStyle = "#f5c542";
-  c.font = `${30 * s}px sans-serif`;
-  c.textAlign = "left";
-  c.textBaseline = "middle";
-  c.fillText("★★★★★", 40 * s, 38 * s);
-  c.fillStyle = "#ffffff";
-  c.font = `${30 * s}px "Bebas Neue", sans-serif`;
-  try { c.letterSpacing = "2px"; } catch (e) { /* older canvas */ }
-  c.fillText((state.quote || "").toUpperCase(), 210 * s, 38 * s);
-  try { c.letterSpacing = "0px"; } catch (e) { /* older canvas */ }
-  c.fillStyle = "#ffffff";
-  c.font = `${36 * s}px "Anton", sans-serif`;
-  c.textAlign = "center";
-  c.fillText((state.gazette || "").toUpperCase(), W / 2, 38 * s);
-  // VOL. 1 box, top right.
-  c.fillStyle = "#f5c542";
-  c.fillRect(W - 190 * s, 14 * s, 162 * s, 48 * s);
-  c.fillStyle = "#241a00";
-  c.font = `${28 * s}px "Anton", sans-serif`;
-  c.fillText("VOL. 1", W - 109 * s, 39 * s);
-}
-
-function drawBilling(c, W, H, topY) {
-  const s = W / 1920;
-  const lines = splitBalanced((state.billing || "").toUpperCase());
-  const fs = 27 * s;
-  c.font = `${fs}px "Bebas Neue", sans-serif`;
-  try { c.letterSpacing = "2px"; } catch (e) { /* older canvas */ }
-  const widths = lines.map((l) => c.measureText(l).width);
-  const bw = Math.max(...widths) + 40 * s;
-  const bh = lines.length * fs * 1.35 + 16 * s;
-  const bx = W / 2 - bw / 2;
-  const by = topY;
-  rr(c, bx, by, bw, bh, 8 * s);
-  c.fillStyle = "rgba(5,3,10,0.55)";
-  c.fill();
-  c.fillStyle = "#f4eefc";
-  c.textAlign = "center";
-  c.textBaseline = "middle";
-  lines.forEach((line, i) => {
-    c.fillText(line, W / 2, by + 14 * s + fs * 0.675 + i * fs * 1.35);
-  });
-  try { c.letterSpacing = "0px"; } catch (e) { /* older canvas */ }
-}
-
-function drawFrame(c, W, H) {
-  c.save();
-  c.strokeStyle = "#f5c542";
-  c.lineWidth = 5;
-  c.strokeRect(6, 6, W - 12, H - 12);
-  c.strokeStyle = "rgba(245,197,66,0.65)";
-  c.lineWidth = 2;
-  c.strokeRect(20, 20, W - 40, H - 40);
-  c.restore();
-}
-
-function getNoiseTile() {
-  if (noiseTile) return noiseTile;
-  const t = document.createElement("canvas");
-  t.width = 160; t.height = 160;
-  const tc = t.getContext("2d");
-  const data = tc.createImageData(160, 160);
-  for (let i = 0; i < data.data.length; i += 4) {
-    const v = Math.floor(Math.random() * 255);
-    data.data[i] = v; data.data[i + 1] = v; data.data[i + 2] = v; data.data[i + 3] = 255;
-  }
-  tc.putImageData(data, 0, 0);
-  noiseTile = t;
-  return t;
-}
-
-function render(target, W, H, forExport) {
-  const c = target || ctx;
-  const layout = LAYOUTS[state.layout] || LAYOUTS["Poster hero"];
-  const grade = GRADES[state.grade] || GRADES["Neon Sunset"];
-  c.clearRect(0, 0, W, H);
-  c.fillStyle = "#0d0a12";
-  c.fillRect(0, 0, W, H);
-  const rects = layout.rects.map((r) => scaleRect(r, W, H));
-  // Title geometry is measured before the panels, so cast-tag chips can dodge it.
-  const titleBox = titleMetrics(layout.title, W, H);
-  // Pop-out hero paints its background photo full-bleed first.
-  const bgIdx = rects.findIndex((r) => r.bg);
-  if (bgIdx >= 0) {
-    const panel = state.panels[bgIdx];
-    const photo = PHOTOS.get(panel.src);
-    if (photo) {
-      const img = photo.img;
-      const scale = Math.max(W / img.naturalWidth, H / img.naturalHeight);
-      const sw = W / scale, sh = H / scale;
-      c.drawImage(img, (img.naturalWidth - sw) / 2, (img.naturalHeight - sh) / 2, sw, sh, 0, 0, W, H);
-      c.fillStyle = "rgba(5,3,10,0.5)";
-      c.fillRect(0, 0, W, H);
-      const wash = c.createLinearGradient(0, 0, 0, H);
-      wash.addColorStop(0, grade.top);
-      wash.addColorStop(1, grade.bottom);
-      c.globalAlpha = grade.wash * 0.7;
-      c.globalCompositeOperation = "overlay";
-      c.fillStyle = wash;
-      c.fillRect(0, 0, W, H);
-      c.globalCompositeOperation = "source-over";
-      c.globalAlpha = 1;
-    }
-  }
-  rects.forEach((rect, i) => {
-    if (rect.bg) return;
-    if (rect.hero && state.layout === "Pop-out hero") {
-      c.save();
-      c.shadowColor = "rgba(0,0,0,0.7)";
-      c.shadowBlur = 42;
-      c.shadowOffsetY = 14;
-      rr(c, rect.x, rect.y, rect.w, rect.h, 10);
-      c.fillStyle = "#000";
-      c.fill();
-      c.restore();
-    }
-    drawPanel(c, rect, state.panels[i], grade, W, H, forExport, titleBox);
-  });
-  // Poster dressing, in the order it layers on a real poster.
-  if (state.toggles.masthead) drawMasthead(c, W, H);
-  drawChromeTitle(c, titleBox, W, H);
-  let dressBottom = drawSunsetLines(c, titleBox.bottom, titleBox.cx, W, H);
-  if (state.toggles.ribbon) dressBottom = drawRibbon(c, titleBox, dressBottom + 12 * (W / 1920), W, H);
-  if (state.toggles.seal) drawSeal(c, layout.seal, W, H);
-  if (state.toggles.billing) {
-    const billTop = Math.max(dressBottom + 12 * (W / 1920), 880 * (H / 1080));
-    drawBilling(c, W, H, billTop);
-  }
-  if (state.toggles.coming) {
-    const s = W / 1920;
-    c.fillStyle = "#f5c542";
-    c.font = `${36 * s}px "Anton", sans-serif`;
-    c.textAlign = "left";
-    c.textBaseline = "middle";
-    try { c.letterSpacing = "3px"; } catch (e) { /* older canvas */ }
-    c.fillText("COMING SOON", 28 * s, H - 34 * s);
-    try { c.letterSpacing = "0px"; } catch (e) { /* older canvas */ }
-    drawBarcode(c, W, H);
-  }
-  if (state.toggles.frame) drawFrame(c, W, H);
-  if (state.toggles.vignette) {
-    const vg = c.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.42, W / 2, H / 2, Math.max(W, H) * 0.72);
-    vg.addColorStop(0, "rgba(0,0,0,0)");
-    vg.addColorStop(1, "rgba(0,0,0,0.42)");
-    c.fillStyle = vg;
-    c.fillRect(0, 0, W, H);
-  }
-  if (state.toggles.grain) {
-    const tile = getNoiseTile();
-    c.save();
-    c.globalAlpha = 0.05;
-    c.globalCompositeOperation = "overlay";
-    for (let y = 0; y < H; y += 160) for (let x = 0; x < W; x += 160) c.drawImage(tile, x, y);
-    c.restore();
-  }
-  // Editor-only marks: selection outline + face pins.
-  if (!forExport) {
-    const sel = state.selected;
-    const rect = rects[sel];
-    if (rect && !rect.bg) {
-      c.save();
-      if (rect.rot) {
-        c.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
-        c.rotate((rect.rot * Math.PI) / 180);
-        c.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
-      }
-      rr(c, rect.x - 3, rect.y - 3, rect.w + 6, rect.h + 6, 12);
-      c.strokeStyle = "#f5c542";
-      c.lineWidth = 4;
-      c.stroke();
-      c.restore();
-    }
-    rects.forEach((r, i) => {
-      const p = state.panels[i];
-      if (!p || !p.face || r.bg) return;
-      const photo = PHOTOS.get(p.src);
-      if (!photo) return;
-      const { sx, sy, sw, sh, scale } = cropFor(p, photo.img, r.w, r.h);
-      const fx = r.x + (p.face.x * photo.img.naturalWidth - sx) * scale;
-      const fy = r.y + (p.face.y * photo.img.naturalHeight - sy) * scale;
-      if (fx < r.x || fx > r.x + r.w || fy < r.y || fy > r.y + r.h) return;
-      c.save();
-      c.strokeStyle = "#2dd4bf";
-      c.lineWidth = 3;
-      c.beginPath(); c.arc(fx, fy, 16, 0, Math.PI * 2); c.stroke();
-      c.beginPath();
-      c.moveTo(fx - 22, fy); c.lineTo(fx - 8, fy);
-      c.moveTo(fx + 8, fy); c.lineTo(fx + 22, fy);
-      c.moveTo(fx, fy - 22); c.lineTo(fx, fy - 8);
-      c.moveTo(fx, fy + 8); c.lineTo(fx, fy + 22);
-      c.stroke();
-      c.restore();
+function buildSampleStrip() {
+  const strip = $('sampleStrip');
+  strip.innerHTML = '';
+  SAMPLES.forEach(def => {
+    const rec = photos.get(def.key);
+    if (!rec) return;
+    const fig = document.createElement('figure');
+    fig.dataset.key = def.key;
+    if (pendingPhoto === def.key) fig.classList.add('on');
+    const img = document.createElement('img');
+    img.src = def.file;
+    img.alt = def.label;
+    const cap = document.createElement('figcaption');
+    cap.textContent = def.label;
+    fig.append(img, cap);
+    fig.addEventListener('click', () => {
+      pendingPhoto = def.key;
+      buildSampleStrip(); buildPhotoStrip();
+      document.querySelectorAll('#sampleStrip figure, #photoStrip figure').forEach(f => f.classList.toggle('on', f.dataset.key === pendingPhoto));
     });
-  }
+    strip.appendChild(fig);
+  });
 }
 
-function renderPreview() {
-  const [W, H] = ASPECTS[state.aspect];
-  if (canvas.width !== W || canvas.height !== H) { canvas.width = W; canvas.height = H; }
-  // In cover-shot mode the render must be export-clean: no selection outline, no face pins.
-  render(ctx, W, H, document.body.classList.contains("shot"));
+function buildPhotoStrip() {
+  const strip = $('photoStrip');
+  strip.innerHTML = '';
+  photos.forEach(rec => {
+    if (rec.key.startsWith('s-')) return; // samples live in their own strip
+    const fig = document.createElement('figure');
+    fig.dataset.key = rec.key;
+    if (pendingPhoto === rec.key) fig.classList.add('on');
+    const img = document.createElement('img');
+    img.src = rec.src;
+    img.alt = rec.label;
+    const cap = document.createElement('figcaption');
+    cap.textContent = rec.label;
+    fig.append(img, cap);
+    fig.addEventListener('click', () => {
+      pendingPhoto = rec.key;
+      buildPhotoStrip(); buildSampleStrip();
+    });
+    strip.appendChild(fig);
+  });
+}
+
+// Options are keyed by the Map key itself — never by a property of the record.
+function buildPhotoSelect() {
+  const sel = $('selPhoto');
+  sel.innerHTML = '';
+  photos.forEach((rec, key) => {
+    const opt = document.createElement('option');
+    opt.value = key;
+    opt.textContent = rec.label;
+    sel.appendChild(opt);
+  });
+  sel.value = state.panels[state.selected].photo;
+}
+
+function syncAllInputs() {
+  $('inTitle').value = state.title;
+  $('inTagline').value = state.tagline;
+  $('inBilling').value = state.billing;
+  $('inQuote').value = state.quote;
+  $('inGazette').value = state.gazette;
+  $('titleCount').textContent = state.title.length + ' / 24';
+  $('billCount').textContent = state.billing.length + ' / 90';
+  $('inFont').value = state.font;
   const p = state.panels[state.selected];
-  $("panel-readout").textContent = `Panel ${state.selected + 1} · ${p ? p.tag : ""}`;
+  $('inZoom').value = p.zoom;
+  $('zoomVal').textContent = p.zoom.toFixed(2) + '×';
+  $('inTag').value = p.tag;
+  buildLayoutChips(); buildGradeChips(); buildPaletteSwatches(); buildPhotoSelect();
+  ['Frame', 'Masthead', 'Seal', 'Billing', 'Coming', 'Grain', 'Vignette'].forEach(name => {
+    const el = $('tg' + name);
+    if (el) el.checked = !!state.show[name.toLowerCase()];
+  });
+  $('btnMarkFace').setAttribute('aria-pressed', pinMode ? 'true' : 'false');
+  $('stage').classList.toggle('pin-mode', pinMode);
 }
 
-/* ---------------- export ---------------- */
-async function exportPNG(w, h) {
-  const off = document.createElement("canvas");
-  off.width = w; off.height = h;
-  const oc = off.getContext("2d");
-  render(oc, w, h, true);
-  const blob = await new Promise((res) => off.toBlob(res, "image/png"));
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = `vice-cover-${w}x${h}.png`;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-  return { width: w, height: h, bytes: blob.size };
-}
-// Test hook: renders an export in-memory so automation can verify dimensions.
-window.__viceExport = async (w, h) => {
-  const off = document.createElement("canvas");
-  off.width = w; off.height = h;
-  render(off.getContext("2d"), w, h, true);
-  const blob = await new Promise((res) => off.toBlob(res, "image/png"));
-  return { width: w, height: h, bytes: blob.size, type: blob.type };
-};
-
-/* ---------------- editor UI ---------------- */
-function buildLayoutGrid() {
-  const grid = $("layout-grid");
-  grid.innerHTML = "";
-  LAYOUT_NAMES.forEach((name, i) => {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.innerHTML = `${name}<small>${LAYOUTS[name].rects.length} panels · key ${i + 1}</small>`;
-    b.classList.toggle("active", state.layout === name);
-    b.addEventListener("click", () => { pushHistory(); state.layout = name; state.selected = 0; syncControls(); renderPreview(); });
-    grid.appendChild(b);
-  });
-}
-function buildGradeGrid() {
-  const grid = $("grade-grid");
-  grid.innerHTML = "";
-  Object.keys(GRADES).forEach((name) => {
-    const g = GRADES[name];
-    const b = document.createElement("button");
-    b.type = "button";
-    b.innerHTML = `<i style="background:linear-gradient(135deg,${g.top},${g.bottom})"></i>${name}`;
-    b.classList.toggle("active", state.grade === name);
-    b.addEventListener("click", () => { pushHistory(); state.grade = name; buildGradeGrid(); renderPreview(); });
-    grid.appendChild(b);
-  });
-}
-function buildStrips() {
-  const strip = $("photo-strip");
-  strip.innerHTML = "";
-  [...PHOTOS.entries()].filter(([, p]) => !p.sample).forEach(([id, p]) => {
-    const img = document.createElement("img");
-    img.src = p.img.src; img.alt = p.name; img.title = p.name;
-    img.classList.toggle("picked", pendingPhoto === id);
-    img.addEventListener("click", () => { pendingPhoto = pendingPhoto === id ? null : id; buildStrips(); });
-    strip.appendChild(img);
-  });
-  const sstrip = $("sample-strip");
-  sstrip.innerHTML = "";
-  SAMPLES.forEach((s) => {
-    const p = PHOTOS.get(s.id);
-    if (!p) return;
-    const img = document.createElement("img");
-    img.src = p.img.src; img.alt = s.name; img.title = s.name;
-    img.classList.toggle("picked", pendingPhoto === s.id);
-    img.classList.toggle("used", state.panels.some((pan) => pan.src === s.id));
-    img.addEventListener("click", () => { pendingPhoto = pendingPhoto === s.id ? null : s.id; buildStrips(); });
-    sstrip.appendChild(img);
-  });
-  const sel = $("select-panel-photo");
-  sel.innerHTML = "";
-  [...PHOTOS.entries()].forEach(([id, p]) => {
-    const o = document.createElement("option");
-    o.value = id; o.textContent = p.name;
-    sel.appendChild(o);
-  });
-  sel.value = state.panels[state.selected].src;
+function syncUndoButtons() {
+  $('btnUndo').disabled = histIndex <= 0;
+  $('btnRedo').disabled = histIndex >= history.length - 1;
 }
 
-function syncControls() {
-  $("input-title").value = state.title;
-  $("input-tagline").value = state.tagline;
-  $("input-billing").value = state.billing;
-  $("input-quote").value = state.quote;
-  $("input-gazette").value = state.gazette;
-  $("input-seal").value = state.sealText;
-  $("select-font").value = state.font;
-  $("title-count").textContent = `${state.title.length} / 24`;
-  $("billing-count").textContent = `${state.billing.length} / 90`;
-  document.querySelectorAll("#chrome-swatches .sw").forEach((b) => b.classList.toggle("active", b.dataset.chrome === state.chrome));
-  document.querySelectorAll(".aspect-btns button").forEach((b) => b.classList.toggle("active", b.dataset.aspect === state.aspect));
-  $("toggle-frame").checked = state.toggles.frame;
-  $("toggle-masthead").checked = state.toggles.masthead;
-  $("toggle-ribbon").checked = state.toggles.ribbon;
-  $("toggle-coming").checked = state.toggles.coming;
-  $("toggle-seal").checked = state.toggles.seal;
-  $("toggle-billing").checked = state.toggles.billing;
-  $("toggle-grain").checked = state.toggles.grain;
-  $("toggle-vignette").checked = state.toggles.vignette;
-  const p = state.panels[state.selected];
-  $("input-zoom").value = p.zoom;
-  $("zoom-readout").textContent = `${p.zoom.toFixed(2)}×`;
-  $("input-tag").value = p.tag;
-  $("select-panel-photo").value = p.src;
-  buildLayoutGrid();
-  buildStrips();
-}
-
-function bindControls() {
-  $("input-title").addEventListener("input", (e) => { state.title = e.target.value.toUpperCase().slice(0, 24); $("title-count").textContent = `${state.title.length} / 24`; renderPreview(); });
-  $("input-title").addEventListener("change", pushHistory);
-  $("input-tagline").addEventListener("input", (e) => { state.tagline = e.target.value; renderPreview(); });
-  $("input-tagline").addEventListener("change", pushHistory);
-  $("input-billing").addEventListener("input", (e) => { state.billing = e.target.value.slice(0, 90); $("billing-count").textContent = `${state.billing.length} / 90`; renderPreview(); });
-  $("input-billing").addEventListener("change", pushHistory);
-  $("input-quote").addEventListener("input", (e) => { state.quote = e.target.value; renderPreview(); });
-  $("input-quote").addEventListener("change", pushHistory);
-  $("input-gazette").addEventListener("input", (e) => { state.gazette = e.target.value; renderPreview(); });
-  $("input-gazette").addEventListener("change", pushHistory);
-  $("input-seal").addEventListener("input", (e) => { state.sealText = e.target.value; renderPreview(); });
-  $("input-seal").addEventListener("change", pushHistory);
-  $("select-font").addEventListener("change", (e) => { pushHistory(); state.font = e.target.value; renderPreview(); });
-  document.querySelectorAll("#chrome-swatches .sw").forEach((b) => {
-    b.addEventListener("click", () => { pushHistory(); state.chrome = b.dataset.chrome; syncControls(); renderPreview(); });
-  });
-  document.querySelectorAll(".aspect-btns button").forEach((b) => {
-    b.addEventListener("click", () => { state.aspect = b.dataset.aspect; syncControls(); renderPreview(); });
-  });
-  const toggleMap = { "toggle-frame": "frame", "toggle-masthead": "masthead", "toggle-ribbon": "ribbon", "toggle-coming": "coming", "toggle-seal": "seal", "toggle-billing": "billing", "toggle-grain": "grain", "toggle-vignette": "vignette" };
-  Object.entries(toggleMap).forEach(([id, key]) => {
-    $(id).addEventListener("change", (e) => { pushHistory(); state.toggles[key] = e.target.checked; renderPreview(); });
-  });
-  $("input-zoom").addEventListener("input", (e) => {
-    state.panels[state.selected].zoom = parseFloat(e.target.value);
-    $("zoom-readout").textContent = `${state.panels[state.selected].zoom.toFixed(2)}×`;
-    renderPreview();
-  });
-  $("input-zoom").addEventListener("change", pushHistory);
-  $("input-tag").addEventListener("input", (e) => { state.panels[state.selected].tag = e.target.value.toUpperCase().slice(0, 18); renderPreview(); });
-  $("input-tag").addEventListener("change", pushHistory);
-  $("select-panel-photo").addEventListener("change", (e) => {
-    pushHistory();
-    const p = state.panels[state.selected];
-    p.src = e.target.value; p.ox = 0; p.oy = 0; p.zoom = 1;
-    p.face = (SAMPLES.find((s) => s.id === p.src) || {}).face || null;
-    syncControls(); renderPreview();
-  });
-  $("btn-prev-photo").addEventListener("click", () => cyclePhoto(-1));
-  $("btn-next-photo").addEventListener("click", () => cyclePhoto(1));
-  $("btn-face").addEventListener("click", () => { faceMarking = true; $("btn-face").textContent = "Click a face in the preview…"; });
-  $("btn-clear-face").addEventListener("click", () => { pushHistory(); state.panels[state.selected].face = null; faceMarking = false; $("btn-face").textContent = "Mark face here"; renderPreview(); });
-  $("btn-fill-all").addEventListener("click", () => {
-    if (!pendingPhoto) { alert("Pick a photo first — click any thumbnail."); return; }
-    pushHistory();
-    state.panels.forEach((p) => { p.src = pendingPhoto; p.ox = 0; p.oy = 0; });
-    syncControls(); renderPreview();
-  });
-  $("btn-shuffle-photos").addEventListener("click", () => {
-    pushHistory();
-    const ids = [...PHOTOS.keys()];
-    state.panels.forEach((p) => { p.src = ids[Math.floor(Math.random() * ids.length)]; p.ox = 0; p.oy = 0; });
-    syncControls(); renderPreview();
-  });
-  $("btn-surprise").addEventListener("click", surprise);
-  $("btn-auto").addEventListener("click", autoLayout);
-  $("btn-undo").addEventListener("click", undo);
-  $("btn-redo").addEventListener("click", redo);
-  $("btn-export-169").addEventListener("click", () => exportPNG(1920, 1080));
-  $("btn-export-11").addEventListener("click", () => exportPNG(1080, 1080));
-  $("btn-export-45").addEventListener("click", () => exportPNG(1080, 1350));
-  $("file-input").addEventListener("change", async (e) => {
-    for (const file of e.target.files) {
-      const id = `u${userSeq++}`;
-      const img = await loadImage(URL.createObjectURL(file));
-      PHOTOS.set(id, { img, name: file.name.replace(/\.[^.]+$/, "").slice(0, 24) || "Upload", sample: false });
-    }
-    e.target.value = "";
-    buildStrips();
-  });
-  document.addEventListener("keydown", (e) => {
-    if (e.target.matches("input, select, textarea")) return;
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") { e.preventDefault(); undo(); return; }
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") { e.preventDefault(); redo(); return; }
-    if (e.key.toLowerCase() === "s") surprise();
-    else if (e.key.toLowerCase() === "a") autoLayout();
-    else if (/^[1-9]$/.test(e.key)) {
-      const name = LAYOUT_NAMES[parseInt(e.key, 10) - 1];
-      if (name) { pushHistory(); state.layout = name; state.selected = 0; syncControls(); renderPreview(); }
-    }
-  });
-}
-
-function cyclePhoto(dir) {
+function setPanelPhoto(slot, key) {
+  if (!photos.has(key)) return;
   pushHistory();
-  const ids = [...PHOTOS.keys()];
-  const p = state.panels[state.selected];
-  const i = ids.indexOf(p.src);
-  p.src = ids[(i + dir + ids.length) % ids.length];
-  p.ox = 0; p.oy = 0; p.zoom = 1;
-  p.face = (SAMPLES.find((s) => s.id === p.src) || {}).face || null;
-  syncControls(); renderPreview();
+  const p = state.panels[slot];
+  p.photo = key;
+  const def = SAMPLES.find(s => s.key === key);
+  if (def) { p.face = [...def.face]; p.ox = 0; p.oy = 0; p.zoom = 1; }
+  buildPhotoSelect();
+  syncAllInputs();
+  render();
+}
+
+/* ------------------------------------------------------------------ */
+/* Canvas interaction                                                 */
+/* ------------------------------------------------------------------ */
+
+function canvasPoint(ev) {
+  const canvas = $('stage');
+  const r = canvas.getBoundingClientRect();
+  return {
+    x: (ev.clientX - r.left) * (canvas.width / r.width),
+    y: (ev.clientY - r.top) * (canvas.height / r.height),
+  };
+}
+
+function hitPanel(pt) {
+  if (!lastRender) return -1;
+  const list = lastRender.geo.panels;
+  for (let i = list.length - 1; i >= 0; i--) {
+    const p = list[i];
+    if (pt.x >= p.x && pt.x <= p.x + p.w && pt.y >= p.y && pt.y <= p.y + p.h) return p.slot;
+  }
+  return -1;
+}
+
+function setFaceFromPoint(slot, pt) {
+  const entry = lastRender && lastRender.wins.get(slot);
+  if (!entry) return;
+  const { rect, win, img } = entry;
+  const fx = (win.sx + ((pt.x - rect.x) / rect.w) * win.sw) / img.naturalWidth;
+  const fy = (win.sy + ((pt.y - rect.y) / rect.h) * win.sh) / img.naturalHeight;
+  pushHistory();
+  state.panels[slot].face = [clamp(fx, 0, 1), clamp(fy, 0, 1)];
+  state.panels[slot].ox = 0;
+  state.panels[slot].oy = 0;
+  render();
+}
+
+let drag = null;
+function bindCanvas() {
+  const canvas = $('stage');
+  canvas.addEventListener('pointerdown', ev => {
+    const pt = canvasPoint(ev);
+    const slot = hitPanel(pt);
+    if (slot < 0) return;
+    canvas.setPointerCapture(ev.pointerId);
+    if (pendingPhoto) {
+      setPanelPhoto(slot, pendingPhoto);
+      pendingPhoto = null;
+      buildSampleStrip(); buildPhotoStrip();
+      return;
+    }
+    state.selected = slot;
+    if (pinMode || ev.altKey) {
+      setFaceFromPoint(slot, pt);
+      pinMode = false;
+      syncAllInputs();
+      return;
+    }
+    const panel = state.panels[slot];
+    drag = { slot, startX: pt.x, startY: pt.y, ox: panel.ox, oy: panel.oy, moved: false };
+    pushHistory();
+    syncAllInputs();
+    render();
+  });
+  canvas.addEventListener('pointermove', ev => {
+    if (!drag) return;
+    const pt = canvasPoint(ev);
+    const entry = lastRender && lastRender.wins.get(drag.slot);
+    if (!entry) return;
+    const panel = state.panels[drag.slot];
+    const dx = pt.x - drag.startX, dy = pt.y - drag.startY;
+    if (Math.abs(dx) + Math.abs(dy) > 2) drag.moved = true;
+    const fx = entry.win.sw / entry.img.naturalWidth;
+    const fy = entry.win.sh / entry.img.naturalHeight;
+    panel.ox = clamp(drag.ox - (dx / entry.rect.w) * fx, -0.6, 0.6);
+    panel.oy = clamp(drag.oy - (dy / entry.rect.h) * fy, -0.6, 0.6);
+    render();
+  });
+  canvas.addEventListener('pointerup', () => { drag = null; });
+  canvas.addEventListener('pointercancel', () => { drag = null; });
+}
+
+/* ------------------------------------------------------------------ */
+/* Wiring                                                             */
+/* ------------------------------------------------------------------ */
+
+function photoKeys() { return [...photos.keys()]; }
+function cyclePhoto(dir) {
+  const keys = photoKeys();
+  const cur = state.panels[state.selected].photo;
+  let i = keys.indexOf(cur);
+  i = (i + dir + keys.length) % keys.length;
+  setPanelPhoto(state.selected, keys[i]);
 }
 
 function surprise() {
   pushHistory();
-  state.layout = LAYOUT_NAMES[Math.floor(Math.random() * LAYOUT_NAMES.length)];
-  const grades = Object.keys(GRADES);
-  state.grade = grades[Math.floor(Math.random() * grades.length)];
-  const chromes = Object.keys(CHROMES);
-  state.chrome = chromes[Math.floor(Math.random() * chromes.length)];
-  const ids = [...PHOTOS.keys()];
-  state.panels.forEach((p) => { p.src = ids[Math.floor(Math.random() * ids.length)]; p.ox = 0; p.oy = 0; });
-  state.selected = 0;
-  buildGradeGrid(); syncControls(); renderPreview();
+  state.layout = LAYOUTS[Math.floor(Math.random() * LAYOUTS.length)].id;
+  state.grade = GRADES[Math.floor(Math.random() * GRADES.length)].id;
+  state.palette = PALETTES[Math.floor(Math.random() * PALETTES.length)].id;
+  syncAllInputs();
+  render();
 }
 
 function autoLayout() {
   pushHistory();
-  const portraits = state.panels.filter((p) => {
-    const ph = PHOTOS.get(p.src);
-    return ph && ph.img.naturalHeight > ph.img.naturalWidth;
-  }).length;
-  if (portraits >= 3) state.layout = "Three columns";
-  else if (portraits >= 1) state.layout = "Hero top";
-  else state.layout = ["Poster hero", "Grid 2x2", "Hero left"][Math.floor(Math.random() * 3)];
-  state.selected = 0;
-  syncControls(); renderPreview();
+  const hero = photos.get(state.panels[0].photo);
+  const portrait = hero && hero.img && hero.img.naturalHeight > hero.img.naturalWidth * 1.15;
+  state.layout = portrait ? 'hero-left' : 'poster';
+  syncAllInputs();
+  render();
 }
 
-/* ---------------- canvas pointer ---------------- */
-function coverPoint(e) {
-  const r = canvas.getBoundingClientRect();
-  const [W, H] = ASPECTS[state.aspect];
-  return { x: ((e.clientX - r.left) / r.width) * W, y: ((e.clientY - r.top) / r.height) * H, W, H };
-}
-function panelAt(x, y, W, H) {
-  const rects = LAYOUTS[state.layout].rects.map((r) => scaleRect(r, W, H));
-  for (let i = rects.length - 1; i >= 0; i--) {
-    const r = rects[i];
-    if (r.bg) continue;
-    if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) return i;
-  }
-  return -1;
-}
-function bindCanvas() {
-  canvas.addEventListener("pointerdown", (e) => {
-    const { x, y, W, H } = coverPoint(e);
-    const idx = panelAt(x, y, W, H);
-    if (idx < 0) return;
-    canvas.setPointerCapture(e.pointerId);
-    const panel = state.panels[idx];
-    if (e.altKey) {
-      pushHistory();
-      const photo = PHOTOS.get(panel.src);
-      const rects = LAYOUTS[state.layout].rects.map((r) => scaleRect(r, W, H));
-      const r = rects[idx];
-      const { sx, sy, sw, sh, scale } = cropFor(panel, photo.img, r.w, r.h);
-      panel.face = { x: (sx + (x - r.x) / scale) / photo.img.naturalWidth, y: (sy + (y - r.y) / scale) / photo.img.naturalHeight };
-      panel.ox = 0; panel.oy = 0;
-      state.selected = idx;
-      syncControls(); renderPreview();
-      return;
-    }
-    if (faceMarking) {
-      pushHistory();
-      const photo = PHOTOS.get(panel.src);
-      const rects = LAYOUTS[state.layout].rects.map((r) => scaleRect(r, W, H));
-      const r = rects[idx];
-      const { sx, sy, scale } = cropFor(panel, photo.img, r.w, r.h);
-      panel.face = { x: (sx + (x - r.x) / scale) / photo.img.naturalWidth, y: (sy + (y - r.y) / scale) / photo.img.naturalHeight };
-      panel.ox = 0; panel.oy = 0;
-      faceMarking = false;
-      $("btn-face").textContent = "Mark face here";
-      state.selected = idx;
-      syncControls(); renderPreview();
-      return;
-    }
-    if (pendingPhoto) {
-      pushHistory();
-      panel.src = pendingPhoto; panel.ox = 0; panel.oy = 0; panel.zoom = 1;
-      panel.face = (SAMPLES.find((s) => s.id === pendingPhoto) || {}).face || null;
-      pendingPhoto = null;
-      state.selected = idx;
-      syncControls(); renderPreview();
-      return;
-    }
-    state.selected = idx;
-    syncControls(); renderPreview();
-    drag = { panel: idx, lastX: x, lastY: y, moved: false };
+function bindUI() {
+  $('inTitle').addEventListener('input', e => { state.title = e.target.value; $('titleCount').textContent = state.title.length + ' / 24'; render(); });
+  $('inTitle').addEventListener('change', pushHistory);
+  $('inTagline').addEventListener('input', e => { state.tagline = e.target.value; render(); });
+  $('inTagline').addEventListener('change', pushHistory);
+  $('inBilling').addEventListener('input', e => { state.billing = e.target.value; $('billCount').textContent = state.billing.length + ' / 90'; render(); });
+  $('inBilling').addEventListener('change', pushHistory);
+  $('inQuote').addEventListener('input', e => { state.quote = e.target.value; render(); });
+  $('inQuote').addEventListener('change', pushHistory);
+  $('inGazette').addEventListener('input', e => { state.gazette = e.target.value; render(); });
+  $('inGazette').addEventListener('change', pushHistory);
+  $('inFont').addEventListener('change', e => { pushHistory(); state.font = e.target.value; render(); });
+  $('inZoom').addEventListener('input', e => {
+    state.panels[state.selected].zoom = parseFloat(e.target.value);
+    $('zoomVal').textContent = state.panels[state.selected].zoom.toFixed(2) + '×';
+    render();
   });
-  canvas.addEventListener("pointermove", (e) => {
-    if (!drag) return;
-    const { x, y, W, H } = coverPoint(e);
-    const rects = LAYOUTS[state.layout].rects.map((r) => scaleRect(r, W, H));
-    const r = rects[drag.panel];
-    const panel = state.panels[drag.panel];
-    const photo = PHOTOS.get(panel.src);
-    if (!photo) return;
-    const { sw, sh } = cropFor(panel, photo.img, r.w, r.h);
-    const dx = x - drag.lastX, dy = y - drag.lastY;
-    if (Math.abs(dx) + Math.abs(dy) > 2) drag.moved = true;
-    panel.ox -= dx * (sw / r.w);
-    panel.oy -= dy * (sh / r.h);
-    drag.lastX = x; drag.lastY = y;
-    renderPreview();
+  $('inZoom').addEventListener('change', pushHistory);
+  $('inTag').addEventListener('input', e => { state.panels[state.selected].tag = e.target.value.toUpperCase().slice(0, 18); render(); });
+  $('inTag').addEventListener('change', pushHistory);
+  $('selPhoto').addEventListener('change', e => setPanelPhoto(state.selected, e.target.value));
+  $('btnPrevPhoto').addEventListener('click', () => cyclePhoto(-1));
+  $('btnNextPhoto').addEventListener('click', () => cyclePhoto(1));
+  $('btnMarkFace').addEventListener('click', () => { pinMode = !pinMode; syncAllInputs(); });
+  $('btnClearFace').addEventListener('click', () => { pushHistory(); state.panels[state.selected].face = null; render(); });
+  $('btnSurprise').addEventListener('click', surprise);
+  $('btnAuto').addEventListener('click', autoLayout);
+  $('btnUndo').addEventListener('click', undo);
+  $('btnRedo').addEventListener('click', redo);
+  document.querySelectorAll('.export').forEach(b => {
+    b.addEventListener('click', () => exportPNG(b.dataset.export));
   });
-  canvas.addEventListener("pointerup", () => {
-    if (drag && drag.moved) pushHistory();
-    drag = null;
+  document.querySelectorAll('.aspect-btns button').forEach(b => {
+    b.addEventListener('click', () => {
+      document.querySelectorAll('.aspect-btns button').forEach(x => x.classList.remove('on'));
+      b.classList.add('on');
+      const [w, h] = SIZES[b.dataset.aspect === '16x9' ? '1920x1080' : b.dataset.aspect === '1x1' ? '1080x1080' : '1080x1350'];
+      const canvas = $('stage');
+      canvas.width = w; canvas.height = h;
+      render();
+    });
   });
-}
-
-/* ---------------- boot ---------------- */
-async function boot() {
-  const params = new URLSearchParams(location.search);
-  const shot = params.get("shot");
-  const ratio = params.get("ratio") || "landscape";
-  if (shot === "cover") {
-    document.body.classList.add("shot");
-    state.aspect = ASPECTS[ratio] ? ratio : "landscape";
-  }
-  for (const s of SAMPLES) {
-    try {
-      const img = await loadImage(s.file);
-      PHOTOS.set(s.id, { img, name: s.name, sample: true });
-    } catch (err) { console.warn("sample failed", s.file, err); }
-  }
-  buildLayoutGrid();
-  buildGradeGrid();
-  bindControls();
+  ['Frame', 'Masthead', 'Seal', 'Billing', 'Coming', 'Grain', 'Vignette'].forEach(name => {
+    $('tg' + name).addEventListener('change', e => {
+      pushHistory();
+      state.show[name.toLowerCase()] = e.target.checked;
+      render();
+    });
+  });
+  $('fileInput').addEventListener('change', async e => {
+    for (const file of e.target.files) {
+      if (!file.type.startsWith('image/')) continue;
+      const url = URL.createObjectURL(file);
+      try {
+        const img = await loadImage(url);
+        const key = 'u' + (++uploadCount);
+        photos.set(key, { key, label: file.name.replace(/\.[^.]+$/, '').slice(0, 18) || 'Upload', img, src: url });
+      } catch (err) { URL.revokeObjectURL(url); }
+    }
+    e.target.value = '';
+    buildPhotoStrip(); buildPhotoSelect();
+    render();
+  });
+  $('btnFillAll').addEventListener('click', () => {
+    const key = pendingPhoto || state.panels[state.selected].photo;
+    if (!photos.has(key)) return;
+    pushHistory();
+    state.panels.forEach(p => { p.photo = key; });
+    pendingPhoto = null;
+    buildSampleStrip(); buildPhotoStrip();
+    render();
+  });
+  $('btnShuffle').addEventListener('click', () => {
+    const keys = photoKeys();
+    pushHistory();
+    state.panels.forEach(p => { p.photo = keys[Math.floor(Math.random() * keys.length)]; });
+    render();
+  });
+  document.addEventListener('keydown', e => {
+    const tag = (e.target.tagName || '').toLowerCase();
+    if (tag === 'input' || tag === 'select' || tag === 'textarea') return;
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); return; }
+    if (e.key === 's' || e.key === 'S') surprise();
+    else if (e.key === 'a' || e.key === 'A') autoLayout();
+    else if (/^[1-9]$/.test(e.key)) {
+      const L = LAYOUTS[parseInt(e.key, 10) - 1];
+      if (L) { pushHistory(); state.layout = L.id; syncAllInputs(); render(); }
+    }
+  });
   bindCanvas();
-  syncControls();
-  try {
-    await Promise.all([
-      document.fonts.load('90px "Anton"'),
-      document.fonts.load('90px "Bebas Neue"'),
-      document.fonts.load('90px "Archivo Black"'),
-      document.fonts.load('90px "Kaushan Script"'),
-      document.fonts.ready,
-    ]);
-  } catch (err) { console.warn("font preload", err); }
-  renderPreview();
-  document.title = "VICE-READY";
+}
+
+/* ------------------------------------------------------------------ */
+/* Boot                                                               */
+/* ------------------------------------------------------------------ */
+
+function shotMode() {
+  const q = new URLSearchParams(location.search);
+  return q.get('shot') || null;
+}
+
+async function boot() {
+  buildLayoutChips();
+  buildGradeChips();
+  buildPaletteSwatches();
+  bindUI();
+  pushHistory();
+  syncAllInputs();
+  const fonts = FONTS.map(f => document.fonts.load(`40px "${f}"`).catch(() => null));
+  await Promise.all(fonts);
+  await initPhotos();
+  const shot = shotMode();
+  if (shot === 'cover') {
+    const ratio = new URLSearchParams(location.search).get('ratio') || '16x9';
+    const [w, h] = SIZES[ratio === '1x1' ? '1080x1080' : ratio === '4x5' ? '1080x1350' : '1920x1080'];
+    const canvas = $('stage');
+    canvas.width = w; canvas.height = h;
+    document.body.classList.add('shot-cover');
+    exportClean = true;
+    render();
+  } else {
+    render();
+  }
   window.__viceReady = true;
 }
 
