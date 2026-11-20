@@ -1,53 +1,44 @@
-# VICE COVER — GTA-style cover art maker
+# VICE COVER: GTA-Style Cover Art Maker
 
-[![gta6-cover-art-01](https://make.fun/badge/gta6-cover-art-01.svg)](https://make.fun/bounty/gta6-cover-art-01)
+[![make.fun](https://make.fun/badge/gta6-cover-art-01.svg)](https://make.fun/bounty/gta6-cover-art-01)
 [![rank](https://make.fun/badge/gta6-cover-art-01/Laika-lgtm/gta6-cover-art-01/rank.svg)](https://make.fun/bounty/gta6-cover-art-01)
 [![reward](https://make.fun/badge/gta6-cover-art-01/Laika-lgtm/gta6-cover-art-01/reward.svg)](https://make.fun/bounty/gta6-cover-art-01)
 
-Turn your photos into a Vice City poster. Pick a multi-panel layout, drop in
-your own photos (or the built-in samples), write the caption, and export a
-PNG in 1080×1080, 1080×1350 or 1920×1080 — everything on your machine, no
-upload, no watermark.
+An offline web app that turns any photo and a caption into multi-panel
+poster-style cover art — bold lettering, a neon-sunset colour grade, cast
+tags, a round seal and a billing band — and exports it as a PNG to share.
 
-**Entry for the [gta6-cover-art-01 bounty](https://make.fun/bounty/gta6-cover-art-01) on make.fun.**
+## What it does
 
-## How it works
-
-1. **Layout** — Vice Classic (hero + 3 panels), Neon Grid (2×2) or Sunset
-   Strip (big + 2 stacked).
-2. **Photos** — upload your own (file picker or drag-and-drop) or use the
-   three built-in samples. Click a panel to select it, drag to move the
-   photo, scroll to zoom, or tick "One photo across all panels".
-3. **Caption** — big Anton lettering with a dark outline and a hot-pink
-   shadow, plus a sub-caption. Pick a colour grade: Sunset, Neon, Noir or
-   Clean.
-4. **Export** — one click, exact PNG size, straight to your downloads.
+- **8 layouts** — 2×2 grid, hero-left, hero-top, full bleed, three columns,
+  tilted snapshots, 9-panel mosaic, and a pop-out hero.
+- **8 colour grades** — Neon Sunset, Vice Pink, Teal Night, Gold Hour,
+  Heatwave, Mono Noir, Palm Teal, Dusk Violet — plus film grain and vignette.
+- **Any photo** — upload your own (stays on your machine, never uploaded),
+  or start from the six built-in sample photos. Drag to reposition, zoom
+  per panel, and click once to mark the face focus point so the crop keeps
+  the person in frame.
+- **Lettering** — title, subtitle and per-panel cast tags in four SIL OFL
+  fonts (Anton, Bebas Neue, Archivo Black, Kaushan Script), all shipped
+  locally under `app/fonts/`.
+- **Fast export** — one click to PNG in 1920×1080, 1080×1080 or 1080×1350.
+- **Editor extras** — auto-layout, surprise-me, undo/redo (Ctrl+Z / Ctrl+Y),
+  keyboard shortcuts, live preview.
 
 ## Run it
 
-Serve `app/` with any static server and open `index.html` in desktop
-Chrome. No build step, no network request at run time: fonts and sample
-photos are files under `app/`.
+Serve `app/` with any static server and open `index.html` in a desktop
+browser. No build step, no network request — every script, font and image
+is a file under `app/`.
 
-```sh
-python3 -m http.server 8080 --directory app
-# open http://localhost:8080
-```
+## Originality
 
-## Files
+All artwork, lettering and code in this app are original. No game logos,
+official artwork or game fonts are used. Sample photos were made with an
+image model for this app and are free to use.
 
-- `app/index.html`, `app/style.css` — the editor page
-- `app/src/poster.js` — the poster renderer (layouts, photo cover-fit,
-  colour grades, caption)
-- `app/src/editor.js` — controls, uploads, drag/zoom, export
-- `app/src/shots.js` — `?shot=` staging for screenshots
-- `app/samples/` — three sample photos, made with an image model for this app
-- `app/fonts/Anton-Regular.ttf` — Anton, SIL Open Font License
-- `main.ts` — the entry program: copies `app/` + `screenshots/` and writes
-  `dossier.json` with the vendored make.fun library
-- `vendor/makefun-app.ts` — the kit's dossier library, unchanged
+## Entry
 
-## License
-
-MIT. Anton is under the SIL Open Font License. The design is original —
-no Rockstar Games logo, artwork or font is used.
+Built for the make.fun competition **gta6-cover-art-01**. `main.ts` copies
+`app/` and `screenshots/` to `/output` and writes `dossier.json` with the
+vendored `vendor/makefun-app.ts` library.

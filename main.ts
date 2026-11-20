@@ -1,35 +1,29 @@
-// VICE COVER entry program (Node 22, standard library only).
+// VICE COVER — entry program for gta6-cover-art-01 (Node 22, stdlib only).
+// It hands the static app in: copies app/ and screenshots/ from beside this
+// file into /output (or MAKEFUN_OUTPUT_DIR outside the grader) and writes
+// /output/dossier.json with the vendored make.fun library, so the scorer
+// can check the app and the judge can read its dossier.
 //
-// It hands the app in: copies the app/ folder and the screenshots/ folder
-// from beside this file into the output directory, then writes the
-// dossier.json the judge reads, using the vendored make.fun library.
-// The grader runs it twice and both runs must write identical bytes, so
-// there is no timestamp, no randomness and no network here — just copies.
-//
-// Local check:  mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
+//   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
 
-import { cpSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { buildDossier } from "./vendor/makefun-app.ts";
+import { cpSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { buildDossier } from './vendor/makefun-app.ts';
 
-const repoRoot = fileURLToPath(new URL(".", import.meta.url));
-const outputDir = process.env.MAKEFUN_OUTPUT_DIR ?? "/output";
+const repoRoot = fileURLToPath(new URL('.', import.meta.url));
+const outDir = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
 
-mkdirSync(outputDir, { recursive: true });
-cpSync(join(repoRoot, "app"), join(outputDir, "app"), { recursive: true });
-
-const shotsDir = join(repoRoot, "screenshots");
-mkdirSync(join(outputDir, "screenshots"), { recursive: true });
-if (existsSync(shotsDir)) {
-  cpSync(shotsDir, join(outputDir, "screenshots"), { recursive: true });
+mkdirSync(outDir, { recursive: true });
+cpSync(join(repoRoot, 'app'), join(outDir, 'app'), { recursive: true });
+mkdirSync(join(outDir, 'screenshots'), { recursive: true });
+if (existsSync(join(repoRoot, 'screenshots'))) {
+  cpSync(join(repoRoot, 'screenshots'), join(outDir, 'screenshots'), { recursive: true });
 }
 
-// Caps from the scorer: at most 4 screenshots, each at most 256 KiB; the
-// app at most 993 files and 48 MiB in all; dossier text at most 160 KiB.
 writeFileSync(
-  join(outputDir, "dossier.json"),
-  buildDossier(outputDir, {
+  join(outDir, 'dossier.json'),
+  buildDossier(outDir, {
     text_max_bytes: 163840,
     screenshots: { max: 4, max_bytes: 262144 },
     app_max_files: 993,
